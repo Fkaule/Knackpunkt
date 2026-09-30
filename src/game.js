@@ -33,6 +33,10 @@
       loads: [{ tiles: [[11, 2]], side: 'right', fx: 0, fy: -6000 }] },
   ];
   for (let x = 5; x < 12; x++) for (let y = 5; y < 12; y++) LEVELS[2].cut.push([x, y]);
+  // Hinter den festen Bauteilen: Zufallsbauteile, jedes mit einer Nummer (src/parts.js)
+  const RANDOM = LEVELS.length, CUSTOM = RANDOM + 1;   // CUSTOM: eigenes Bauteil aus dem Baukasten
+  const newNr = () => 1 + Math.floor(Math.random() * 99999);
+  const partName = d => d.nr ? `${d.name} Nr. ${d.nr}` : d.name;
 
   // Farbskala ohne Gelb: blau, türkis, grün, orange, rot; über der Streckgrenze magenta
   const STOPS = [[0, [38, 60, 150]], [0.2, [44, 110, 214]], [0.4, [24, 164, 196]], [0.6, [52, 178, 116]],
@@ -50,9 +54,9 @@
 
   // open: Spielart „Offene Karten“ (Spannungen sichtbar, jede Wegnahme endgültig, Versagen beendet das Spiel)
   let soloOpen = false;
-  const st = { li: 0, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
+  const st = { li: 0, key: 0, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', drag: null,
-    eso: [], esoRun: null, animId: 0, busy: false };
+    eso: {}, esoRun: null, animId: 0, busy: false };
   let G = null;
   const C = {};
   const removedPct = (L, conn) => 100 * (1 - count(conn) / count(L.domain));
@@ -64,27 +68,75 @@
   }
 
   // ---------- Geometrie ----------
-  const loadLabel = ld => `F = ${fmt(Math.hypot(ld.fx, ld.fy) / 1000)} kN`;
-  function layout() {
-    const d = st.def, [mt, , mb, ml] = d.margin;
-    const W = wrap.clientWidth, maxH = Math.max(240, Math.min(innerHeight * 0.62, 620));
-    if (!W) return;   // Zeichnung gerade ausgeblendet (Warteraum, Auflösung am Beamer)
-    let mr = d.margin[1], s;
-    // Rechts neben einer seitlichen Last muss die Beschriftung Platz haben (schmale Bildschirme)
-    for (let pass = 0; pass < 3; pass++) {
-      s = Math.min(W / (d.tx + ml + mr), maxH / (d.ty + mt + mb));
-      const ld = d.loads.find(l => l.side === 'right');
-      if (!ld) break;
-      ctx.font = `600 ${Math.max(12, s * 0.45)}px ${MONO}`;
-      const need = 0.75 + (ctx.measureText(loadLabel(ld)).width + 6) / s;
-      if (need <= mr) break;
-      mr = need;
+  const kN = ld => Math.round(Math.hypot(ld.fx, ld.fy) / 100) / 10;
+  const loadLabel = ld => ld.unknown ? 'F = ?' : `F = ${fmt(kN(ld), kN(ld) % 1 ? 1 : 0)} kN`;
+  const OUT = { left: [-1, 0], right: [1, 0], top: [0, 1], bottom: [0, -1] };
+  // Kante einer Lager- oder Lastgruppe in Kacheln, y nach oben: Enden a und b, Mitte p, Normale n nach außen
+  function sideOf(grp) {
+    const xs = grp.tiles.map(t => t[0]), ys = grp.tiles.map(t => t[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs) + 1, y0 = Math.min(...ys), y1 = Math.max(...ys) + 1;
+    const [a, b] = { left: [[x0, y0], [x0, y1]], right: [[x1, y0], [x1, y1]], top: [[x0, y1], [x1, y1]], bottom: [[x0, y0], [x1, y0]] }[grp.side];
+    return { a, b, p: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n: OUT[grp.side] };
+  }
+  // Lastpfeil in Kacheln: Zieht die Last nach außen, beginnt er am Rand, drückt sie, endet er dort,
+  // längs der Kante steht er daneben. Die Beschriftung sitzt am äußeren Ende, vom Bauteil abgewandt.
+  function arrow(ld) {
+    const { p, n } = sideOf(ld), F = Math.hypot(ld.fx, ld.fy), f = [ld.fx / F, ld.fy / F], d = f[0] * n[0] + f[1] * n[1];
+    let tip, tail;
+    if (d > 0.3) { tail = [p[0] + n[0] * 0.12, p[1] + n[1] * 0.12]; tip = [tail[0] + f[0] * 2.2, tail[1] + f[1] * 2.2]; }
+    else {
+      const off = d < -0.3 ? 0.08 : 0.45;
+      tip = [p[0] + n[0] * off, p[1] + n[1] * off]; tail = [tip[0] - f[0] * 2.2, tip[1] - f[1] * 2.2];
     }
-    const H = Math.round(s * (d.ty + mt + mb)), dpr = devicePixelRatio || 1;
+    const o = d > 0.3 ? tip : tail;
+    let lab;
+    if (Math.abs(f[0]) < 0.3) { const sx = n[0] < 0 ? -1 : 1; lab = [o[0] + 0.3 * sx, o[1] + (o[1] > p[1] ? -0.25 : 0.25), sx > 0 ? 'left' : 'right']; }
+    else { const sx = o[0] > p[0] ? 1 : -1; lab = [o[0] + 0.25 * sx, o[1], sx > 0 ? 'left' : 'right']; }
+    return { p, f, tip, tail, lab };
+  }
+  // Wie weit Lager und Lastpfeile samt Beschriftung über das Bauteil hinausragen, in Kacheln: [oben, rechts, unten, links]
+  function around(d, s) {
+    const e = [0, 0, 0, 0];
+    const grow = (x, y) => { e[0] = Math.max(e[0], y - d.ty); e[1] = Math.max(e[1], x - d.tx); e[2] = Math.max(e[2], -y); e[3] = Math.max(e[3], -x); };
+    for (const sp of d.supports) {
+      const { a, b, p, n } = sideOf(sp), t = [Math.abs(n[1]), Math.abs(n[0])];
+      if (sp.kind === 'wand') for (const [q, k] of [[a, -1], [b, 1]]) grow(q[0] + t[0] * 0.3 * k + n[0] * 0.35, q[1] + t[1] * 0.3 * k + n[1] * 0.35);
+      else for (const k of [-1, 1]) grow(p[0] + t[0] * 0.7 * k + n[0] * 1.15, p[1] + t[1] * 0.7 * k + n[1] * 1.15);
+    }
+    const px = Math.max(12, s * 0.45);
+    ctx.font = `600 ${px}px ${MONO}`;
+    for (const ld of d.loads) {
+      const g = arrow(ld), w = (ctx.measureText(loadLabel(ld)).width + 6) / s, h = px / s, [lx, ly, al] = g.lab, x0 = al === 'left' ? lx : lx - w;
+      grow(...g.tip); grow(...g.tail); grow(x0, ly - h / 2); grow(x0 + w, ly + h / 2);
+    }
+    return e;
+  }
+  // Ränder um das Bauteil [oben, rechts, unten, links] und Lage der Bemaßung (Seite, Abstand), in Kacheln
+  function frame(d, s) {
+    const e = around(d, s);
+    // feste Bauteile: Ränder von Hand gesetzt, Bemaßung unten und links; nur für breite Beschriftung nachlegen
+    if (d.margin) return { m: d.margin.map((m, i) => Math.max(m, e[i])), dh: ['bottom', d.margin[2] * 0.7], dv: ['left', d.margin[3] * 0.7] };
+    // sonst: Bemaßung auf die freiere Seite, Maßzahl über der Maßlinie
+    const txt = (Math.max(11, s * 0.42) + 4) / s, a = Math.max(5, s * 0.22) / s, m = e.map(x => x + 0.4);
+    const dh = e[2] <= e[0] + 0.5 ? ['bottom', e[2] + 0.2 + txt] : ['top', e[0] + 0.5];
+    const dv = e[3] <= e[1] + 0.5 ? ['left', e[3] + 0.5] : ['right', e[1] + 0.2 + txt];
+    if (dh[0] === 'bottom') m[2] = dh[1] + a + 0.3; else m[0] = dh[1] + txt + 0.3;
+    if (dv[0] === 'left') m[3] = dv[1] + txt + 0.3; else m[1] = dv[1] + a + 0.3;
+    return { m, dh, dv };
+  }
+  function layout() {
+    const pad = mp.on ? 58 : 0;   // im Wettkampf steht oben links die Uhr: Zeichnung darunter beginnen
+    const d = st.def, W = wrap.clientWidth, maxH = Math.max(240, Math.min(innerHeight * 0.62, 620)) - pad;
+    if (!W) return;   // Zeichnung gerade ausgeblendet (Warteraum, Auflösung am Beamer)
+    // Beschriftungen haben eine Mindestgröße: auf schmalen Bildschirmen brauchen sie mehr Rand, also zweimal nachrechnen
+    const fit = m => Math.min(W / (d.tx + m[3] + m[1]), maxH / (d.ty + m[0] + m[2]));
+    let s = fit(d.margin || [2, 2, 2, 2]), F;
+    for (let pass = 0; pass < 3; pass++) { F = frame(d, s); s = fit(F.m); }
+    const [mt, mr, mb, ml] = F.m, H = Math.round(s * (d.ty + mt + mb)) + pad, dpr = devicePixelRatio || 1;
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    G = { s, W, H, ox: (W - s * (d.tx + ml + mr)) / 2 + s * ml, oy: s * (mt + d.ty) };
+    G = { s, W, H, ox: (W - s * (d.tx + ml + mr)) / 2 + s * ml, oy: s * (mt + d.ty) + pad, F };
   }
   const X = i => G.ox + i / M * G.s;          // Knotenindex in Pixel
   const Y = j => G.oy - j / M * G.s;
@@ -172,6 +224,7 @@
   function render() {
     if (!G) return;
     ctx.clearRect(0, 0, G.W, G.H);
+    if (st.phase === 'edit') { drawEditor(); drawSupports(); drawLoads({}); return; }
     drawPaper();
     if (st.view.mode === 'blind') {
       drawBlind(st.solid, st.conn, true);
@@ -301,36 +354,38 @@
     ctx.restore();
   }
 
-  // Lagersymbole wie in der Technischen Mechanik
+  // Lagersymbole wie in der Technischen Mechanik, an jeder Seite
   function drawSupports() {
-    const s = G.s;
+    const s = G.s, P = ([x, y]) => [G.ox + x * s, G.oy - y * s];
     ctx.save(); ctx.strokeStyle = C.ink; ctx.fillStyle = C.sheet;
     for (const sp of st.def.supports) {
-      const xs = sp.tiles.map(t => t[0]), ys = sp.tiles.map(t => t[1]), hs = s * 0.32;
+      const { a, b, p, n } = sideOf(sp), hs = s * 0.32;
       if (sp.kind === 'wand') {
-        let a, b;
-        if (sp.side === 'left') {
-          const x = G.ox + Math.min(...xs) * s;
-          a = [x, G.oy - Math.min(...ys) * s + s * 0.3]; b = [x, G.oy - (Math.max(...ys) + 1) * s - s * 0.3];
-        } else {
-          const y = G.oy - (Math.max(...ys) + 1) * s;
-          a = [G.ox + Math.min(...xs) * s - s * 0.3, y]; b = [G.ox + (Math.max(...xs) + 1) * s + s * 0.3, y];
-        }
-        ctx.lineWidth = Math.max(2, s * 0.1); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+        // Wandlinie 0,3 Kacheln über die eingespannten Kacheln hinaus, Schraffur nach außen
+        const t = [Math.sign(b[0] - a[0]), Math.sign(b[1] - a[1])];
+        let A = P([a[0] - t[0] * 0.3, a[1] - t[1] * 0.3]), B = P([b[0] + t[0] * 0.3, b[1] + t[1] * 0.3]);
+        if (A[1] > B[1]) [A, B] = [B, A];   // Schraffur beginnt oben bzw. links
+        ctx.lineWidth = Math.max(2, s * 0.1); ctx.beginPath(); ctx.moveTo(...A); ctx.lineTo(...B); ctx.stroke();
+        const len = Math.hypot(B[0] - A[0], B[1] - A[1]), hx = (n[0] + Math.abs(n[1])) * hs, hy = (Math.abs(n[0]) - n[1]) * hs;
         ctx.lineWidth = 1; ctx.beginPath();
-        if (sp.side === 'left') for (let y = b[1]; y < a[1]; y += s * 0.25) { ctx.moveTo(a[0], y); ctx.lineTo(a[0] - hs, y + hs); }
-        else for (let x = a[0]; x < b[0]; x += s * 0.25) { ctx.moveTo(x, a[1]); ctx.lineTo(x + hs, a[1] - hs); }
+        for (let q = 0; q < len; q += s * 0.25) {
+          const x = A[0] + (B[0] - A[0]) * q / len, y = A[1] + (B[1] - A[1]) * q / len;
+          ctx.moveTo(x, y); ctx.lineTo(x + hx, y + hy);
+        }
         ctx.stroke();
       } else {
-        const cx = G.ox + (xs[0] + 0.5) * s, y = G.oy - ys[0] * s, h = s * 0.7, w = s * 0.85;
+        // Symbol für ein Lager unter dem Bauteil, gedreht auf die jeweilige Seite
+        const [cx, cy] = P(p), h = s * 0.7, w = s * 0.85;
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate({ bottom: 0, top: Math.PI, right: -Math.PI / 2, left: Math.PI / 2 }[sp.side]);
         ctx.lineWidth = Math.max(1.5, s * 0.06);
-        ctx.beginPath(); ctx.moveTo(cx, y); ctx.lineTo(cx - w / 2, y + h); ctx.lineTo(cx + w / 2, y + h); ctx.closePath();
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-w / 2, h); ctx.lineTo(w / 2, h); ctx.closePath();
         ctx.fill(); ctx.stroke();
-        const gy = y + h + (sp.kind === 'los' ? s * 0.2 : 0);
-        ctx.beginPath(); ctx.moveTo(cx - w * 0.8, gy); ctx.lineTo(cx + w * 0.8, gy); ctx.stroke();
+        const gy = h + (sp.kind === 'los' ? s * 0.2 : 0);
+        ctx.beginPath(); ctx.moveTo(-w * 0.8, gy); ctx.lineTo(w * 0.8, gy); ctx.stroke();
         ctx.lineWidth = 1; ctx.beginPath();
-        for (let x = cx - w * 0.8; x < cx + w * 0.8; x += s * 0.2) { ctx.moveTo(x + s * 0.2, gy); ctx.lineTo(x, gy + s * 0.2); }
+        for (let x = -w * 0.8; x < w * 0.8; x += s * 0.2) { ctx.moveTo(x + s * 0.2, gy); ctx.lineTo(x, gy + s * 0.2); }
         ctx.stroke();
+        ctx.restore();
       }
     }
     ctx.restore();
@@ -340,29 +395,27 @@
     const s = G.s, r = v.res && v.res.disp ? v.res : null;
     const scale = r ? (v.scale || 0) * (v.defo == null ? 1 : v.defo) : 0;
     for (const ld of st.def.loads) {
-      const xs = ld.tiles.map(t => t[0]), ys = ld.tiles.map(t => t[1]);
-      let i, j;
-      if (ld.side === 'right') { i = (Math.max(...xs) + 1) * M; j = (Math.min(...ys) + Math.max(...ys) + 1) * M / 2; }
-      else { j = (Math.max(...ys) + 1) * M; i = (Math.min(...xs) + Math.max(...xs) + 1) * M / 2; }
-      const u = scale ? nodeU(r, i, j) : [0, 0], F = Math.hypot(ld.fx, ld.fy), ux = ld.fx / F, uy = -ld.fy / F;
-      const tx = X(i) + u[0] * scale / TILE * s + (ld.side === 'right' ? s * 0.45 : 0);
-      const ty = Y(j) - u[1] * scale / TILE * s - (ld.side === 'top' ? s * 0.08 : 0);
-      const len = s * 2.2, hl = s * 0.45, hw = s * 0.22, bx = tx - ux * len, by = ty - uy * len;
+      const g = arrow(ld), u = scale ? nodeU(r, g.p[0] * M, g.p[1] * M) : [0, 0];
+      const P = ([x, y]) => [G.ox + x * s + u[0] * scale / TILE * s, G.oy - y * s - u[1] * scale / TILE * s];
+      const [tx, ty] = P(g.tip), [bx, by] = P(g.tail), [lx, ly] = P(g.lab), ux = g.f[0], uy = -g.f[1];
+      const hl = s * 0.45, hw = s * 0.22;
       ctx.save(); ctx.strokeStyle = C.accent; ctx.fillStyle = C.accent; ctx.lineWidth = Math.max(2, s * 0.1);
       ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx - ux * hl, ty - uy * hl); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(tx, ty);
       ctx.lineTo(tx - ux * hl - uy * hw, ty - uy * hl + ux * hw); ctx.lineTo(tx - ux * hl + uy * hw, ty - uy * hl - ux * hw);
       ctx.closePath(); ctx.fill();
-      ctx.font = `600 ${Math.max(12, s * 0.45)}px ${MONO}`; ctx.textBaseline = 'middle';
-      ctx.fillText(loadLabel(ld), bx + s * 0.3, by + s * 0.25);
+      ctx.font = `600 ${Math.max(12, s * 0.45)}px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = g.lab[2];
+      ctx.fillText(loadLabel(ld), lx, ly);
       ctx.restore();
     }
   }
 
+  // Gesamtmaße: Breite unten oder oben, Höhe links oder rechts, je nachdem, wo Platz ist
   function drawDims() {
-    const d = st.def, s = G.s, a = Math.max(5, s * 0.22);
+    const d = st.def, s = G.s, a = Math.max(5, s * 0.22), [hSide, hD] = G.F.dh, [vSide, vD] = G.F.dv;
     const x0 = G.ox, x1 = G.ox + d.tx * s, y0 = G.oy, yt = G.oy - d.ty * s;
-    const yd = y0 + s * d.margin[2] * 0.7, xd = x0 - s * d.margin[3] * 0.7;
+    const sy = hSide === 'bottom' ? 1 : -1, ye = sy > 0 ? y0 : yt, yd = ye + sy * s * hD;
+    const sx = vSide === 'left' ? -1 : 1, xe = sx < 0 ? x0 : x1, xd = xe + sx * s * vD;
     const head = (x, y, ux, uy) => {
       ctx.beginPath(); ctx.moveTo(x, y);
       ctx.lineTo(x - ux * a - uy * a * 0.3, y - uy * a + ux * a * 0.3); ctx.lineTo(x - ux * a + uy * a * 0.3, y - uy * a - ux * a * 0.3);
@@ -370,8 +423,8 @@
     };
     ctx.save(); ctx.strokeStyle = C.ink2; ctx.fillStyle = C.ink2; ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(x0, y0 + s * 0.15); ctx.lineTo(x0, yd + a); ctx.moveTo(x1, y0 + s * 0.15); ctx.lineTo(x1, yd + a);
-    ctx.moveTo(x0 - s * 0.15, y0); ctx.lineTo(xd - a, y0); ctx.moveTo(x0 - s * 0.15, yt); ctx.lineTo(xd - a, yt);
+    ctx.moveTo(x0, ye + sy * s * 0.15); ctx.lineTo(x0, yd + sy * a); ctx.moveTo(x1, ye + sy * s * 0.15); ctx.lineTo(x1, yd + sy * a);
+    ctx.moveTo(xe + sx * s * 0.15, y0); ctx.lineTo(xd + sx * a, y0); ctx.moveTo(xe + sx * s * 0.15, yt); ctx.lineTo(xd + sx * a, yt);
     ctx.moveTo(x0, yd); ctx.lineTo(x1, yd); ctx.moveTo(xd, y0); ctx.lineTo(xd, yt);
     ctx.stroke();
     head(x0, yd, -1, 0); head(x1, yd, 1, 0); head(xd, y0, 0, 1); head(xd, yt, 0, -1);
@@ -400,10 +453,11 @@
   }
 
   function panel() {
+    if (st.phase === 'edit') return edPanel();
     const L = st.L, d = st.def, total = count(L.domain);
-    const kept = count(st.phase === 'eso' ? st.eso[st.li].res.conn : st.conn);
-    $('tb-name').textContent = d.name;
-    $('tb-load').textContent = `F = ${fmt(Math.hypot(d.loads[0].fx, d.loads[0].fy) / 1000)} kN`;
+    const kept = count(st.phase === 'eso' ? st.eso[st.key].res.conn : st.conn);
+    $('tb-name').textContent = partName(d);
+    $('tb-load').textContent = loadLabel(d.loads[0]);
     $('tb-size').textContent = `${d.tx * TILE} × ${d.ty * TILE} × ${THICK} mm`;
     $('tb-mass').textContent = `${fmt(kept * TILE_G)} von ${fmt(total * TILE_G)} g`;
     $('tb-removed').textContent = `${fmt(100 * (1 - kept / total), 1)} %`;
@@ -411,24 +465,31 @@
       : mp.role === 'host' ? `${mp.g.pr} je Person`
       : st.probes ? `${st.probes} übrig` : mp.on ? 'keine übrig' : 'verbraucht';
     const rid = mp.role === 'host' ? mp.g.rid : mp.rid;
-    $('tb-sheet').textContent = mp.on ? (rid ? `Runde ${rid}` : 'Warteraum') : `${st.li + 1} von ${LEVELS.length}`;
+    $('tb-sheet').textContent = mp.on ? (rid ? `Runde ${rid}` : 'Warteraum')
+      : st.li === RANDOM ? 'Zufallsbauteil' : st.li === CUSTOM ? 'Baukasten' : `${st.li + 1} von ${LEVELS.length}`;
   }
 
   function controls() {
-    const design = st.phase === 'design' || st.phase === 'probe';
+    const design = st.phase === 'design' || st.phase === 'probe', edit = st.phase === 'edit';
     $('act-design').hidden = !design;
-    $('act-result').hidden = design;
+    $('act-result').hidden = design || edit;
+    $('act-edit').hidden = !edit;
+    $('etools').hidden = !edit;
+    if (!mp.on) $('tools').hidden = edit;
     for (const b of document.querySelectorAll('.actions .btn')) b.disabled = st.busy;
     if (!st.busy) {
       $('b-probe').disabled = !st.probes || $('live').checked;
       $('b-undo').disabled = !st.undo.length;
-      $('b-eso').disabled = !st.eso[st.li];
+      $('b-eso').disabled = !st.eso[st.key];
+      $('b-play').disabled = !(edit && ed.res && ed.res.def);
     }
     $('b-probe').textContent = `Probe-Rechnung (${st.probes})`;
-    $('b-probe').hidden = $('b-undo').hidden = $('b-reset').hidden = $('live-row').hidden = st.open;
+    $('b-probe').hidden = $('b-undo').hidden = $('b-reset').hidden = st.open;
+    $('live-row').hidden = st.open || edit;
     const openRules = st.open || (mp.role === 'host' && mp.g.mo === 'o');   // der Beamer erklärt die Regeln der laufenden Runde
-    $('howto').hidden = openRules;
-    $('howto-open').hidden = !openRules;
+    $('howto').hidden = openRules || edit;
+    $('howto-open').hidden = !openRules || edit;
+    $('howto-edit').hidden = !edit;
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
@@ -463,13 +524,20 @@
     panel(); controls(); render(); mpRender();
   }
 
-  function loadLevel(i) {
+  // i: festes Bauteil, RANDOM mit Nummer oder CUSTOM mit Code als arg
+  function loadLevel(i, arg) {
     st.animId++;
-    st.li = i; st.def = LEVELS[i]; st.L = FEM.level(st.def);
+    const def = i === RANDOM ? PARTS.generate(arg) : i === CUSTOM ? PARTS.fromCode(arg) || LEVELS[0] : LEVELS[i];
+    st.li = i; st.def = def; st.key = def.nr ? 'z' + def.nr : def.code ? 'b' + def.code : i; st.L = FEM.level(def);
     st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.busy = false;
     st.drag = null; st.paint = null; st.hover = -1;
     $('stamp').hidden = true;
     document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
+    // Zufalls- und eigene Bauteile im Link festhalten, damit man sie wiederholen oder weitergeben kann (Einladungslinks bleiben)
+    if (!mp.on && (i >= RANDOM || /^#(nr|bau)-/.test(location.hash))) {
+      const h = def.nr ? '#nr-' + def.nr : def.code ? '#bau-' + def.code : location.pathname + location.search;
+      try { history.replaceState(null, '', h); } catch {}
+    }
     layout(); refresh(); startEso();
   }
 
@@ -573,7 +641,7 @@
   }
 
   function verdict() {
-    const r = st.res, L = st.L, total = count(L.domain), rem = removedPct(L, r.conn), e = st.eso[st.li];
+    const r = st.res, L = st.L, total = count(L.domain), rem = removedPct(L, r.conn), e = st.eso[st.key];
     let h;
     if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${fmt(100 * r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
     else {
@@ -597,7 +665,7 @@
   }
 
   function toggleEso() {
-    const e = st.eso[st.li];
+    const e = st.eso[st.key];
     if (!e || st.busy) return;
     if (st.phase === 'eso') {
       st.phase = 'result'; st.view = st.resultView;
@@ -615,20 +683,245 @@
 
   // ESO läuft im Hintergrund in kleinen Zeitscheiben, damit das Zeichnen flüssig bleibt
   function startEso() {
-    const li = st.li;
-    if (st.eso[li] || (st.esoRun && st.esoRun.li === li)) return;
-    const gen = FEM.eso(st.L), run = st.esoRun = { li };
+    const key = st.key;
+    if (st.eso[key] || (st.esoRun && st.esoRun.key === key)) return;
+    const gen = FEM.eso(st.L), run = st.esoRun = { key };
     const pump = () => {
       if (st.esoRun !== run) return;
       const t0 = performance.now();
       let s;
       do s = gen.next(); while (!s.done && performance.now() - t0 < 12);
       if (!s.done) return void setTimeout(pump, 0);
-      st.eso[li] = s.value; st.esoRun = null;
-      if (st.li === li && st.phase === 'result' && !st.busy) { verdict(); controls(); }
+      for (const k in st.eso) if (k[0] === 'z' || k[0] === 'b') delete st.eso[k];   // von Zufalls- und eigenen Bauteilen nur das aktuelle
+      st.eso[key] = s.value; st.esoRun = null;
+      if (st.key === key && st.phase === 'result' && !st.busy) { verdict(); controls(); }
     };
     setTimeout(pump, 300);
   }
+
+  // ---------- Baukasten ----------
+  // Raster mit Material; Einspannungen, Lager und Last hängen an Außenkanten, Schlüssel "x,y,Seite"
+  const ED_TX = 24, ED_TY = 16;
+  const ed = { cells: null, walls: new Set(), pins: new Map(), load: [], deg: -90, tool: 'form', drag: null, hover: null, raw: null, res: null };
+  const vert = side => side === 'left' || side === 'right';
+  const edHas = (x, y) => x >= 0 && y >= 0 && x < ED_TX && y < ED_TY && ed.cells[x + y * ED_TX] === 1;
+  const edFree = key => { const [x, y, side] = key.split(','), [dx, dy] = OUT[side]; return edHas(+x, +y) && !edHas(+x + dx, +y + dy); };
+  const ED_MSG = {
+    leer: 'Noch kein Material: Mit „Material“ ein Rechteck aufziehen.',
+    zerfallen: 'Das Bauteil zerfällt in mehrere Teile. Alles muss über Kanten zusammenhängen.',
+    lager: 'Es fehlt ein Lager: Einspannung, Festlager oder Loslager auf eine Außenkante setzen.',
+    last: 'Es fehlt die Last: Mit „Last“ auf eine Außenkante klicken.',
+    kante: 'Lager und Last müssen an einer Außenkante sitzen.',
+    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Ein Loslager hält nur in einer Richtung.',
+    bereich: 'Die Last läge nicht zwischen 1 und 100 kN. Last und Lager weiter auseinander setzen oder mehr Material stehen lassen.',
+  };
+
+  // Erster Aufruf oder von einem anderen Bauteil aus: dieses Bauteil zum Abwandeln übernehmen
+  function openEditor() {
+    st.animId++;
+    if (!ed.cells || st.li !== CUSTOM) edFrom(st.def);
+    Object.assign(st, { li: CUSTOM, phase: 'edit', busy: false, drag: null, paint: null, hover: -1 });
+    $('stamp').hidden = true; $('legend').hidden = true; $('femline').textContent = '';
+    document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === CUSTOM)));
+    edUpdate();
+  }
+  function edFrom(d) {
+    const ox = Math.max(0, (ED_TX - d.tx) >> 1), oy = Math.max(0, (ED_TY - d.ty) >> 1), L = FEM.level(d);
+    ed.cells = new Uint8Array(ED_TX * ED_TY);
+    for (let k = 0; k < L.nT; k++) if (L.domain[k]) {
+      const x = k % d.tx + ox, y = Math.floor(k / d.tx) + oy;
+      if (x < ED_TX && y < ED_TY) ed.cells[x + y * ED_TX] = 1;
+    }
+    ed.walls = new Set(); ed.pins = new Map();
+    for (const sp of d.supports) for (const [x, y] of sp.tiles) {
+      const key = `${x + ox},${y + oy},${sp.side}`;
+      if (sp.kind === 'wand') ed.walls.add(key); else ed.pins.set(key, sp.kind);
+    }
+    const ld = d.loads[0];
+    ed.load = ld.tiles.map(([x, y]) => `${x + ox},${y + oy},${ld.side}`);
+    ed.deg = Math.round(Math.atan2(ld.fy, ld.fx) / (Math.PI / 4)) * 45;
+    if (ed.deg === -180) ed.deg = 180;
+  }
+  // Rohform für PARTS, auf Wunsch auf das umschließende Rechteck zugeschnitten
+  function edRaw(trim) {
+    let x0 = 0, y0 = 0, tx = ED_TX, ty = ED_TY;
+    if (trim) {
+      let x1 = -1, y1 = -1;
+      x0 = ED_TX; y0 = ED_TY;
+      for (let k = 0; k < ed.cells.length; k++) if (ed.cells[k]) {
+        const x = k % ED_TX, y = (k - x) / ED_TX;
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+      if (x1 < 0) return { tx: 1, ty: 1, cells: new Uint8Array(1), supports: [], load: null };
+      tx = x1 - x0 + 1; ty = y1 - y0 + 1;
+    }
+    const cells = new Uint8Array(tx * ty);
+    for (let y = 0; y < ty; y++) for (let x = 0; x < tx; x++) cells[x + y * tx] = ed.cells[x + x0 + (y + y0) * ED_TX];
+    const parse = key => { const [x, y, side] = key.split(','); return [+x - x0, +y - y0, side]; };
+    // Einspannungen: aneinanderstoßende Kanten derselben Seite zu einer Einspannung zusammenfassen
+    const walls = [...ed.walls].map(parse)
+      .sort((a, b) => a[2].localeCompare(b[2]) || (vert(a[2]) ? a[0] - b[0] || a[1] - b[1] : a[1] - b[1] || a[0] - b[0]));
+    const runs = [];
+    for (const [x, y, side] of walls) {
+      const r = runs.at(-1), q = r && r.tiles.at(-1);
+      if (r && r.side === side && (vert(side) ? q[0] === x && q[1] + 1 === y : q[1] === y && q[0] + 1 === x)) r.tiles.push([x, y]);
+      else runs.push({ kind: 'wand', side, tiles: [[x, y]] });
+    }
+    const pins = [...ed.pins].map(([key, kind]) => { const [x, y, side] = parse(key); return { kind, side, tiles: [[x, y]] }; });
+    const ld = ed.load.map(parse);
+    return { tx, ty, cells, supports: [...runs, ...pins],
+      load: ld.length ? { side: ld[0][2], tiles: ld.map(([x, y]) => [x, y]), deg: ed.deg } : null };
+  }
+  // Nach jeder Änderung: ungültige Kanten entfernen, prüfen, Last bemessen, zeichnen
+  function edUpdate() {
+    for (const k of ed.walls) if (!edFree(k)) ed.walls.delete(k);
+    for (const k of [...ed.pins.keys()]) if (!edFree(k)) ed.pins.delete(k);
+    if (!ed.load.every(edFree)) ed.load = [];
+    ed.raw = edRaw(true);
+    ed.res = PARTS.build(ed.raw);
+    const view = PARTS.shape(edRaw(false)), d = ed.res.def;
+    view.margin = [3, 4, 3, 4];   // feste Ränder, damit beim Bauen nichts springt
+    if (view.loads[0]) {
+      if (d) Object.assign(view.loads[0], { fx: d.loads[0].fx, fy: d.loads[0].fy });
+      else view.loads[0].unknown = true;
+    }
+    st.def = view; st.L = FEM.level(view); st.solid = ed.cells;
+    $('verdict').innerHTML = `<p>${d ? `<span class="t-ok">Bereit.</span> Die Last wird auf ${loadLabel(d.loads[0])} gesetzt, ` +
+      `damit das Vollteil zu ${fmt(100 * d.util)} % ausgelastet ist. „Spielen“ startet den Entwurf.` : ED_MSG[ed.res.error]}</p>`;
+    layout(); panel(); controls(); render();
+  }
+  function edPanel() {
+    const n = count(ed.cells), d = ed.res && ed.res.def;
+    $('tb-name').textContent = 'Eigenes Bauteil';
+    $('tb-load').textContent = d ? loadLabel(d.loads[0]) : 'noch offen';
+    $('tb-size').textContent = n ? `${ed.raw.tx * TILE} × ${ed.raw.ty * TILE} × ${THICK} mm` : 'noch offen';
+    $('tb-mass').textContent = `${fmt(n * TILE_G)} g`;
+    $('tb-removed').textContent = `${fmt(0, 1)} %`;
+    $('tb-probe').textContent = st.open ? 'entfällt, offene Karten' : '1 übrig';
+    $('tb-sheet').textContent = 'Baukasten';
+  }
+
+  function drawEditor() {
+    const L = st.L, s = G.s;
+    ctx.lineWidth = 1; ctx.strokeStyle = C.grid; ctx.beginPath();   // alle Kacheln, damit man sieht, wo Material hin kann
+    for (let k = 0; k < L.nT; k++) { const [x, y] = tileRect(k); ctx.rect(x + 0.5, y + 0.5, s - 1, s - 1); }
+    ctx.stroke();
+    drawBlind(ed.cells, ed.cells, false);
+    const d = ed.drag;
+    if (d && ed.tool === 'form') {
+      const x0 = Math.min(d.a[0], d.b[0]), x1 = Math.max(d.a[0], d.b[0]), y0 = Math.min(d.a[1], d.b[1]), y1 = Math.max(d.a[1], d.b[1]);
+      ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = d.v ? C.steel : C.sheet;
+      ctx.fillRect(G.ox + x0 * s, G.oy - (y1 + 1) * s, (x1 - x0 + 1) * s, (y1 - y0 + 1) * s);
+      ctx.globalAlpha = 1; ctx.setLineDash([6, 4]); ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
+      ctx.strokeRect(G.ox + x0 * s, G.oy - (y1 + 1) * s, (x1 - x0 + 1) * s, (y1 - y0 + 1) * s);
+      ctx.restore();
+    } else if (!d && ed.tool === 'form' && ed.hover) {
+      const [x, y] = ed.hover;
+      ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.strokeRect(G.ox + x * s + 1, G.oy - (y + 1) * s + 1, s - 2, s - 2);
+    }
+    // Kanten, auf die das Werkzeug wirken würde
+    const keys = ed.tool === 'form' ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand') : ed.hover ? [ed.hover] : [];
+    ctx.save(); ctx.strokeStyle = C.accent; ctx.lineWidth = Math.max(3, s * 0.16); ctx.lineCap = 'round'; ctx.beginPath();
+    for (const key of keys) {
+      const g = sideOf({ tiles: [key.split(',').slice(0, 2).map(Number)], side: key.split(',')[2] });
+      ctx.moveTo(G.ox + g.a[0] * s, G.oy - g.a[1] * s); ctx.lineTo(G.ox + g.b[0] * s, G.oy - g.b[1] * s);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+
+  const edPos = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left - G.ox) / G.s, (G.oy - e.clientY + b.top) / G.s]; };
+  const edCell = ([px, py]) => [Math.max(0, Math.min(ED_TX - 1, Math.floor(px))), Math.max(0, Math.min(ED_TY - 1, Math.floor(py)))];
+  // nächste Außenkante am Zeiger, mit der Maus höchstens eine halbe Kachel entfernt, mit dem Finger eine ganze
+  function edEdge([px, py], touch) {
+    let best = null, bd = touch ? 1 : 0.5;
+    for (let y = Math.floor(py) - 1; y <= Math.floor(py) + 1; y++) for (let x = Math.floor(px) - 1; x <= Math.floor(px) + 1; x++) {
+      if (!edHas(x, y)) continue;
+      for (const side of ['left', 'right', 'top', 'bottom']) {
+        const [dx, dy] = OUT[side];
+        if (edHas(x + dx, y + dy)) continue;
+        const mx = x + 0.5 + dx / 2, my = y + 0.5 + dy / 2;
+        const dist = vert(side) ? Math.hypot(px - mx, Math.max(0, Math.abs(py - my) - 0.5)) : Math.hypot(Math.max(0, Math.abs(px - mx) - 0.5), py - my);
+        if (dist < bd) { bd = dist; best = `${x},${y},${side}`; }
+      }
+    }
+    return best;
+  }
+  // gerade Außenkante von a bis b; ein Klick (a gleich b) mit whole nimmt die ganze gerade Kante
+  function edRun(a, b, whole) {
+    const [ax, ay, side] = a.split(','), [bx, by, side2] = b.split(','), v = vert(side);
+    const key = i => v ? `${ax},${+ay + i},${side}` : `${+ax + i},${ay},${side}`;
+    const out = [a];
+    if (a === b && whole) {
+      for (const dir of [-1, 1]) for (let i = dir; edFree(key(i)); i += dir) out.push(key(i));
+      return out;
+    }
+    if (side2 !== side || (v ? bx !== ax : by !== ay)) return out;
+    const n = v ? by - ay : bx - ax, dir = Math.sign(n);
+    for (let i = dir; dir && Math.abs(i) <= Math.abs(n) && edFree(key(i)); i += dir) out.push(key(i));
+    return out;
+  }
+  function edApply(keys, click) {
+    const clear = k => { ed.walls.delete(k); ed.pins.delete(k); if (ed.load.includes(k)) ed.load = []; };
+    const t = ed.tool;
+    if (t === 'wand') {
+      const on = keys.every(k => ed.walls.has(k));
+      for (const k of keys) if (on) ed.walls.delete(k); else { clear(k); ed.walls.add(k); }
+    } else if (t === 'fest' || t === 'los') {
+      const k = keys[0];
+      if (ed.pins.get(k) === t) ed.pins.delete(k); else { clear(k); ed.pins.set(k, t); }
+    } else if (click && ed.load.includes(keys[0])) {
+      const TURN = [-90, -135, 180, 135, 90, 45, 0, -45];   // Klick auf die Last dreht sie im Uhrzeigersinn
+      ed.deg = TURN[(TURN.indexOf(ed.deg) + 1) % 8];
+    } else {
+      for (const k of keys) clear(k);
+      ed.load = keys; ed.deg = -90;
+    }
+  }
+  cv.addEventListener('pointerdown', e => {
+    if (st.phase !== 'edit') return;
+    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);
+    const p = edPos(e);
+    if (ed.tool === 'form') { const c = edCell(p); ed.drag = { a: c, b: c, v: edHas(...c) ? 0 : 1 }; }
+    else { const k = edEdge(p, e.pointerType === 'touch'); ed.drag = k ? { a: k, b: k } : null; }
+    render();
+  });
+  cv.addEventListener('pointermove', e => {
+    if (st.phase !== 'edit') return;
+    const p = edPos(e), d = ed.drag;
+    if (d) {
+      const b = ed.tool === 'form' ? edCell(p) : edEdge(p, e.pointerType === 'touch') || d.b;
+      if (String(b) !== String(d.b)) { d.b = b; render(); }
+      return;
+    }
+    const h = ed.tool === 'form' ? edCell(p) : edEdge(p);
+    if (String(h) !== String(ed.hover)) { ed.hover = h; render(); }
+  });
+  cv.addEventListener('pointerup', () => {
+    const d = ed.drag;
+    if (st.phase !== 'edit' || !d) return;
+    ed.drag = null;
+    if (ed.tool === 'form') {
+      for (let y = Math.min(d.a[1], d.b[1]); y <= Math.max(d.a[1], d.b[1]); y++)
+        for (let x = Math.min(d.a[0], d.b[0]); x <= Math.max(d.a[0], d.b[0]); x++) ed.cells[x + y * ED_TX] = d.v;
+    } else edApply(edRun(d.a, d.b, ed.tool === 'wand'), d.a === d.b);
+    edUpdate();
+  });
+  cv.addEventListener('pointerleave', () => { if (st.phase === 'edit' && ed.hover) { ed.hover = null; render(); } });
+  $('etools').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    ed.tool = b.dataset.t;
+    for (const x of $('etools').children) x.setAttribute('aria-pressed', String(x === b));
+    ed.hover = null; render();
+  };
+  $('b-play').onclick = () => {
+    if (!ed.res || !ed.res.def) return;
+    const code = PARTS.encode(ed.raw);
+    store.set('bau', code);   // für den Wettkampf und das nächste Mal
+    loadLevel(CUSTOM, code);
+  };
+  $('b-clear').onclick = () => { ed.cells.fill(0); ed.walls.clear(); ed.pins.clear(); ed.load = []; edUpdate(); };
 
   // ---------- Wettkampf: Verbindung ----------
   // Im claude.ai-Artifact über den eingebauten Raum, sonst über den eigenen Spielserver (WebSocket /ws).
@@ -746,7 +1039,7 @@
   const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   const mp = { on: false, role: null, code: '', name: '', j: 0, rid: 0, sub: false, revealed: 0, own: null,
-    g: { rid: 0, ph: 'lobby', lv: 0, dur: 90, left: 0, pr: 2, mo: 'b' }, pr: 0, broken: false, tick: null, deadline: 0, revealTimer: null,
+    g: { rid: 0, ph: 'lobby', lv: 0, nr: 0, bc: '', dur: 90, left: 0, pr: 2, mo: 'b' }, pr: 0, broken: false, tick: null, deadline: 0, revealTimer: null,
     snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false };
   let mpScr = '';
 
@@ -765,9 +1058,11 @@
   }
   function validG(g) {
     if (!g || typeof g !== 'object' || !Number.isInteger(g.rid) || g.rid < 0) return null;
-    if (!['lobby', 'design', 'reveal'].includes(g.ph) || !Number.isInteger(g.lv) || !LEVELS[g.lv]) return null;
-    return { rid: g.rid, ph: g.ph, lv: g.lv, dur: Number(g.dur) || 90, left: Math.max(0, Math.min(999, Math.round(Number(g.left) || 0))),
-      pr: Math.max(0, Math.min(9, Math.round(Number(g.pr) || 0))), mo: g.mo === 'o' ? 'o' : 'b' };
+    if (!['lobby', 'design', 'reveal'].includes(g.ph) || !Number.isInteger(g.lv)) return null;
+    if (!LEVELS[g.lv] && !(g.lv === RANDOM && Number.isInteger(g.nr) && g.nr > 0 && g.nr < 1e5)
+      && !(g.lv === CUSTOM && typeof g.bc === 'string' && g.bc.length <= 400)) return null;
+    return { rid: g.rid, ph: g.ph, lv: g.lv, nr: g.lv === RANDOM ? g.nr : 0, bc: g.lv === CUSTOM ? g.bc : '', dur: Number(g.dur) || 90,
+      left: Math.max(0, Math.min(999, Math.round(Number(g.left) || 0))), pr: Math.max(0, Math.min(9, Math.round(Number(g.pr) || 0))), mo: g.mo === 'o' ? 'o' : 'b' };
   }
   const hostG = () => { const h = hostPeer(); return h ? validG(h.presence.g) : null; };
   const validRes = res => (Array.isArray(res) ? res : [])
@@ -791,7 +1086,7 @@
     st.open = g.mo === 'o';
     Object.assign(mp, { rid: g.rid, sub: false, broken: false, own: null, pr: st.open ? 0 : g.pr });
     pres({ r: g.rid, s: 0, d: null, pu: 0, rm: 0, x: 0 });
-    loadLevel(g.lv);
+    loadLevel(g.lv, g.lv === CUSTOM ? g.bc : g.nr);
     st.probes = mp.pr;
     st.probeText = '';
     panel();
@@ -828,7 +1123,7 @@
 
   // ---------- Wettkampf: Spielleitung ----------
   const scoreList = () => Object.values(mp.scores).sort((a, b) => b.pts - a.pts).slice(0, 10).map(s => [s.name, Math.round(s.pts * 10)]);
-  const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, dur: mp.g.dur, pr: mp.g.pr, mo: mp.g.mo,
+  const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, nr: mp.g.nr, bc: mp.g.bc, dur: mp.g.dur, pr: mp.g.pr, mo: mp.g.mo,
     scores: mp.scores, t: Date.now() });
   function savedHost() {
     const h = store.get('host');
@@ -838,21 +1133,24 @@
     const r = resume ? savedHost() : null;
     Object.assign(mp, { role: 'host', code: r ? normCode(r.code) : newCode(), j: Date.now(), snap: null, order: null,
       scores: r && r.scores && typeof r.scores === 'object' ? r.scores : {},
-      g: { rid: r ? r.rid | 0 : 0, ph: 'lobby', lv: r && LEVELS[r.lv] ? r.lv : 0, dur: r ? r.dur || 90 : 90, left: 0,
+      g: { rid: r ? r.rid | 0 : 0, ph: 'lobby', lv: 0, nr: 0, bc: '', dur: r ? r.dur || 90 : 90, left: 0,
         pr: r && Number.isInteger(r.pr) ? r.pr : 2, mo: r && r.mo === 'o' ? 'o' : 'b' } });
+    if (r && (LEVELS[r.lv] || (r.lv === RANDOM && r.nr > 0) || (r.lv === CUSTOM && PARTS.fromCode(r.bc))))
+      Object.assign(mp.g, { lv: r.lv, nr: r.lv === RANDOM ? r.nr : 0, bc: r.lv === CUSTOM ? r.bc : '' });
     st.open = false;   // die Spielleitung zeigt das Bauteil ohne Spannungen
-    loadLevel(mp.g.lv);
+    loadLevel(mp.g.lv, mp.g.lv === CUSTOM ? mp.g.bc : mp.g.nr);
     st.phase = 'locked';
     pres({ k: mp.code, h: 1, n: 'Spielleitung', j: mp.j, g: { ...mp.g }, sc: scoreList() });
     saveHost(); mpSync();
   }
   function hostStart() {
     const lv = +$('mp-lv').value, dur = +$('mp-dur').value, pr = +$('mp-pr').value, mo = $('mp-mo').value === 'o' ? 'o' : 'b';
-    Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, dur, left: dur, pr, mo });
+    Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, nr: lv === RANDOM ? newNr() : 0, bc: lv === CUSTOM ? store.get('bau') || '' : '',
+      dur, left: dur, pr, mo });
     Object.assign(mp, { deadline: performance.now() + dur * 1000, snap: null, order: null });
     stopBoard();
     st.open = false;
-    loadLevel(lv);
+    loadLevel(lv, lv === CUSTOM ? mp.g.bc : mp.g.nr);
     st.phase = 'locked';
     pres({ g: { ...mp.g }, res: null });
     clearInterval(mp.tick);
@@ -949,14 +1247,16 @@
     }
   }
   function drawMini(canvas, L, solid, r) {
-    const W = canvas.clientWidth || 150, s = W / (L.TX + 1), H = Math.round(s * (L.TY + 1)), dpr = devicePixelRatio || 1;
+    // Karte höchstens so hoch wie breit, hohe schmale Bauteile mittig
+    const W = canvas.clientWidth || 150, s = W / (Math.max(L.TX, L.TY) + 1), H = Math.round(s * (L.TY + 1)), dpr = devicePixelRatio || 1;
+    const x0 = (W - s * (L.TX + 1)) / 2;
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + 'px';
     const c = canvas.getContext('2d');
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.lineWidth = 1;
     for (let k = 0; k < L.nT; k++) {
       if (!L.domain[k]) continue;
-      const tx = k % L.TX, ty = (k - tx) / L.TX, x = s / 2 + tx * s, y = H - s / 2 - (ty + 1) * s;
+      const tx = k % L.TX, ty = (k - tx) / L.TX, x = x0 + s / 2 + tx * s, y = H - s / 2 - (ty + 1) * s;
       if (!solid[k] || (r && !r.conn[k])) { c.strokeStyle = C.grid; c.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1); continue; }
       c.fillStyle = r && r.disp && r.fe[k] ? bandOf(r.tileUtil[k]) : L.frozen[k] ? C.steel2 : C.steel;
       c.fillRect(x, y, s, s);
@@ -965,7 +1265,7 @@
   }
 
   // ---------- Wettkampf: Anzeige ----------
-  const esoNow = () => st.eso[st.li] ? removedPct(st.L, st.eso[st.li].res.conn) : null;
+  const esoNow = () => st.eso[st.key] ? removedPct(st.L, st.eso[st.key].res.conn) : null;
   // Platz je Eintrag der sortierten Liste; gleicher Wert gleicher Platz, alle Brüche teilen sich den letzten
   const places = list => list.map((e, i) => {
     let p = i;
@@ -1015,7 +1315,6 @@
     return 'p-wait';
   }
   const DRAWING = { 'p-design': 1, 'p-locked': 1, 'p-result': 1, 'h-design': 1 };
-  const lvName = lv => esc(LEVELS[lv].name);
   const SIDE = {
     start: () => `<p class="mp-net" id="mp-net"></p>
       <h3>Mitspielen</h3>
@@ -1032,12 +1331,12 @@
       <p id="mp-msg"></p>
       <button class="btn" type="button" data-act="leave">Raum verlassen</button>`,
     'p-design': () => st.open ? `<p class="mp-net" id="mp-net"></p>
-      <p><b>Runde ${mp.rid}: ${lvName(st.li)}, offene Karten.</b> Sie sehen die Spannungen. Jede Wegnahme ist endgültig.
+      <p><b>Runde ${mp.rid}: ${esc(partName(st.def))}, offene Karten.</b> Sie sehen die Spannungen. Jede Wegnahme ist endgültig.
         Versagt Ihr Bauteil, sind Sie raus. Hören Sie rechtzeitig auf.</p>
       <div class="actions"><button class="btn primary" type="button" data-act="submit">Aufhören und werten</button></div>
       <p id="mp-probe"></p>
       <p id="mp-msg"></p>` : `<p class="mp-net" id="mp-net"></p>
-      <p><b>Runde ${mp.rid}: ${lvName(st.li)}.</b> Entfernen Sie Material, bis die Zeit abläuft. Wer zu viel wegnimmt, bricht.
+      <p><b>Runde ${mp.rid}: ${esc(partName(st.def))}.</b> Entfernen Sie Material, bis die Zeit abläuft. Wer zu viel wegnimmt, bricht.
         Wer zu wenig wegnimmt, verliert gegen die anderen.${mp.pr ? ` Mit ${mp.pr === 1 ? 'einer Probe-Rechnung' : `${mp.pr} Probe-Rechnungen`}
         sehen Sie die Spannungen Ihres aktuellen Entwurfs.` : ''}</p>
       <div class="actions">
@@ -1060,7 +1359,8 @@
     'h-lobby': () => `<p class="mp-net" id="mp-net"></p>
       <p class="mp-warn" id="mp-warn"></p>
       <div class="row2">
-        <label class="field">Bauteil<select id="mp-lv">${LEVELS.map((d, i) => `<option value="${i}">${i + 1} ${esc(d.name)}</option>`).join('')}</select></label>
+        <label class="field">Bauteil<select id="mp-lv">${LEVELS.map((d, i) => `<option value="${i}">${i + 1} ${esc(d.name)}</option>`).join('')}
+          <option value="${RANDOM}">Zufallsbauteil</option>${PARTS.fromCode(store.get('bau')) ? `<option value="${CUSTOM}">Eigenes Bauteil</option>` : ''}</select></label>
         <label class="field">Zeit<select id="mp-dur">${[60, 90, 120, 180].map(s => `<option value="${s}">${mmss(s)} min</option>`).join('')}</select></label>
       </div>
       <label class="field">Spielart<select id="mp-mo"><option value="b">Blind, mit Probe-Rechnungen</option><option value="o">Offene Karten</option></select></label>
@@ -1069,7 +1369,7 @@
       <h3>Gesamtwertung</h3><div id="mp-score"></div>
       <button class="btn" type="button" data-act="end">Spiel beenden</button>`,
     'h-design': () => `<p class="mp-net" id="mp-net"></p>
-      <p><b>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</b> läuft, ${mp.g.mo === 'o' ? 'offene Karten'
+      <p><b>Runde ${mp.g.rid}: ${esc(partName(st.def))}</b> läuft, ${mp.g.mo === 'o' ? 'offene Karten'
         : mp.g.pr ? `je Person ${mp.g.pr === 1 ? 'eine Probe-Rechnung' : `${mp.g.pr} Probe-Rechnungen`}` : 'ohne Probe-Rechnung'}.</p>
       <p id="mp-msg"></p>
       <ul class="chips" id="mp-chips"></ul>
@@ -1094,7 +1394,7 @@
       <p id="mp-join"></p>
       <h2 id="mp-count"></h2>
       <ul class="chips" id="mp-chips"></ul>`,
-    'h-reveal': () => `<h2>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</h2>
+    'h-reveal': () => `<h2>Runde ${mp.g.rid}: ${esc(partName(st.def))}</h2>
       <div class="cards" id="mp-cards">${(mp.order || []).map((e, i) =>
         `<div class="card" data-i="${i}"><canvas></canvas><div class="nm">${esc(e.name)}</div><div class="vl"></div></div>`).join('')}</div>
       <div class="split" id="mp-final"></div>`,
@@ -1121,7 +1421,7 @@
         if (h.length === 4) $('mp-code').value = h;
       }
       if (scr === 'h-lobby') {
-        $('mp-lv').value = String(mp.g.rid ? (mp.g.lv + 1) % LEVELS.length : mp.g.lv);
+        $('mp-lv').value = String(mp.g.rid && mp.g.lv < RANDOM ? mp.g.lv + 1 : mp.g.lv);   // nach den festen Bauteilen Zufall
         $('mp-dur').value = String(mp.g.dur);
         $('mp-pr').value = String(mp.g.pr);
         $('mp-mo').value = mp.g.mo;
@@ -1208,6 +1508,8 @@
     panel();
   }
 
+  // dasselbe Bauteil neu beginnen; im Baukasten dort weiterbauen
+  const reload = () => st.li === CUSTOM && !st.def.code ? openEditor() : loadLevel(st.li, st.def.nr || st.def.code);
   function setMode(on) {
     if (mp.on === on) return;
     mp.on = on;
@@ -1219,7 +1521,7 @@
     leaveRoom(false);
     $('drawing').hidden = false; $('mp-board').hidden = true; $('timer').hidden = true; $('tools').hidden = false;
     st.open = soloOpen;
-    loadLevel(st.li);
+    reload();
   }
 
   const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
@@ -1324,7 +1626,7 @@
     $('stamp').hidden = true; refresh();
   };
   $('b-eso').onclick = toggleEso;
-  $('b-next').onclick = () => { if (!st.busy) loadLevel((st.li + 1) % LEVELS.length); };
+  $('b-next').onclick = () => { if (!st.busy) loadLevel(Math.min(st.li + 1, RANDOM), newNr()); };
   $('live').onchange = () => { if (editable()) { st.phase = 'design'; refresh(); } };
   // Spielart allein: Wechsel beginnt das Bauteil neu
   const setOpen = on => {
@@ -1333,13 +1635,18 @@
     $('g-blind').setAttribute('aria-pressed', String(!on));
     $('g-open').setAttribute('aria-pressed', String(on));
     $('live').checked = false;
-    loadLevel(st.li);
+    reload();
   };
   $('g-blind').onclick = () => setOpen(false);
   $('g-open').onclick = () => setOpen(true);
 
-  $('levels').innerHTML = LEVELS.map((d, i) => `<button type="button" data-i="${i}">${i + 1} ${d.name}</button>`).join('');
-  $('levels').onclick = e => { const b = e.target.closest('button'); if (b) loadLevel(+b.dataset.i); };
+  $('levels').innerHTML = LEVELS.map((d, i) => `<button type="button" data-i="${i}">${i + 1} ${d.name}</button>`).join('') +
+    `<button type="button" data-i="${RANDOM}" title="Jedes Mal ein neues Bauteil">Zufall</button>` +
+    `<button type="button" data-i="${CUSTOM}" title="Eigenes Bauteil bauen oder das aktuelle abwandeln">Bauen</button>`;
+  $('levels').onclick = e => {
+    const b = e.target.closest('button');
+    if (b) +b.dataset.i === CUSTOM ? openEditor() : loadLevel(+b.dataset.i, newNr());
+  };
 
   $('legend').innerHTML = '<span class="lg-t">Vergleichsspannung je Kachel in MPa</span><ol>' +
     BANDS.map((c, b) => `<li><i style="background:${c}"></i><span>${b % 2 ? '' : fmt(RE * b / 10)}</span></li>`).join('') +
@@ -1353,6 +1660,10 @@
   if (document.fonts) document.fonts.ready.then(render);
 
   readColors();
-  loadLevel(0);
+  // Link auf ein Zufallsbauteil oder ein eigenes Bauteil
+  const linkNr = /^#nr-([1-9]\d{0,4})$/.exec(location.hash), linkBau = /^#bau-(.+)$/.exec(location.hash);
+  if (linkNr) loadLevel(RANDOM, +linkNr[1]);
+  else if (linkBau && PARTS.fromCode(linkBau[1])) loadLevel(CUSTOM, linkBau[1]);
+  else loadLevel(0);
   if (/^#[A-Za-z0-9]{4}$/.test(location.hash)) setMode(true);   // Einladungslink mit Raumcode
 })();
