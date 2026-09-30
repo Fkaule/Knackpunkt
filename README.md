@@ -1,6 +1,6 @@
 # Knackpunkt
 
-FEM-Minispiel: Aus einem Bauteil Kacheln entfernen, dann rechnet eine echte FE-Rechnung (ebener Spannungszustand, im Browser), ob es hält. Allein gegen den ESO-Algorithmus oder als Wettkampf mit Raumcode und Auflösung am Beamer.
+FEM-Minispiel: Aus einem Bauteil Kacheln entfernen, dann rechnet eine echte FE-Rechnung (ebener Spannungszustand, im Browser), ob es hält. Allein gegen den ESO-Algorithmus oder als Wettkampf mit Raumcode und Auflösung am Beamer, blind oder mit offenen Karten.
 
 Allein üben: https://fkaule.github.io/Knackpunkt/
 
@@ -224,11 +224,17 @@ npm start       # Server auf PORT (Standard 8080)
 
 Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 
+## Spielarten
+
+- **Blind:** Man entfernt Material, ohne die Spannungen zu sehen. Erst beim Abgeben rechnet die FEM. Eine Probe-Rechnung zeigt zwischendurch die Spannungen des aktuellen Entwurfs, bis man weiterarbeitet (allein eine, im Wettkampf legt die Spielleitung 0 bis 5 fest). Allein gibt es zum Üben zusätzlich Live-Spannungen.
+- **Offene Karten:** Nach jeder Wegnahme rechnet die FEM sofort und zeigt die Spannungen. Jede Wegnahme ist endgültig, es gibt kein Rückgängig und kein Zurückholen. Versagt das Bauteil, ist der Versuch sofort vorbei und zählt nichts. Wer aufhört, lässt den aktuellen Stand werten.
+
 ## Wettkampf
 
-- Spielleitung: „Mehrspieler“, „Neues Spiel eröffnen“, Bauteil und Zeit wählen, Runde starten
+- Spielleitung: „Mehrspieler“, „Neues Spiel eröffnen“, Bauteil, Zeit und Spielart wählen, Runde starten
 - Mitspielende: Link mit `#RAUMCODE` öffnen oder Code eintippen, Pseudonym eintragen
-- Probe-Rechnungen: Die Spielleitung legt je Runde fest, wie viele (0 bis 5). Eine Probe zeigt die Spannungen des aktuellen Entwurfs, bis man weiterarbeitet
+- Blind: Die Spielleitung legt je Runde fest, wie viele Probe-Rechnungen jede Person hat (0 bis 5); der Beamer zeigt die verbrauchten Proben
+- Offene Karten: Der Beamer zeigt live, wie viel jede Person schon entfernt hat, grün heißt aufgehört, rot heißt Bruch. Wer bricht, ist in dieser Runde raus
 - Ende der Zeit gibt automatisch ab; die FEM rechnet alle Entwürfe bei der Spielleitung, Punkte = entfernte Prozent, wenn es hält, sonst 0
 
 ## Deploy mit Docker

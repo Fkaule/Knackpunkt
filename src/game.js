@@ -48,7 +48,9 @@
   const OVER = '#ff2e88';
   const bandOf = u => u > 1 ? OVER : BANDS[Math.min(9, Math.floor(Math.max(0, u) * 10))];
 
-  const st = { li: 0, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1,
+  // open: Spielart „Offene Karten“ (Spannungen sichtbar, jede Wegnahme endgültig, Versagen beendet das Spiel)
+  let soloOpen = false;
+  const st = { li: 0, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', drag: null,
     eso: [], esoRun: null, animId: 0, busy: false };
   let G = null;
@@ -405,7 +407,8 @@
     $('tb-size').textContent = `${d.tx * TILE} × ${d.ty * TILE} × ${THICK} mm`;
     $('tb-mass').textContent = `${fmt(kept * TILE_G)} von ${fmt(total * TILE_G)} g`;
     $('tb-removed').textContent = `${fmt(100 * (1 - kept / total), 1)} %`;
-    $('tb-probe').textContent = mp.role === 'host' ? `${mp.g.pr} je Person`
+    $('tb-probe').textContent = st.open || (mp.role === 'host' && mp.g.mo === 'o') ? 'entfällt, offene Karten'
+      : mp.role === 'host' ? `${mp.g.pr} je Person`
       : st.probes ? `${st.probes} übrig` : mp.on ? 'keine übrig' : 'verbraucht';
     const rid = mp.role === 'host' ? mp.g.rid : mp.rid;
     $('tb-sheet').textContent = mp.on ? (rid ? `Runde ${rid}` : 'Warteraum') : `${st.li + 1} von ${LEVELS.length}`;
@@ -422,6 +425,11 @@
       $('b-eso').disabled = !st.eso[st.li];
     }
     $('b-probe').textContent = `Probe-Rechnung (${st.probes})`;
+    $('b-probe').hidden = $('b-undo').hidden = $('b-reset').hidden = $('live-row').hidden = st.open;
+    const openRules = st.open || (mp.role === 'host' && mp.g.mo === 'o');   // der Beamer erklärt die Regeln der laufenden Runde
+    $('howto').hidden = openRules;
+    $('howto-open').hidden = !openRules;
+    $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
     $('t-rect').disabled = $('t-brush').disabled = !design || st.busy;
@@ -433,7 +441,15 @@
     st.conn = FEM.connect(st.L, st.solid, st.L.supportTiles);
     const loose = st.solid.some((x, k) => x && !st.conn[k]);
     const hint = loose ? '<p>Rot gestrichelte Kacheln haben keine Verbindung zum Lager und fallen beim Abgeben ab.</p>' : '';
-    if (!mp.on && $('live').checked) {
+    if (st.open && st.phase === 'design') {
+      const r = FEM.analyze(st.L, st.solid);
+      if (!r.ok) return openFail();
+      st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
+      showFem(r, 0);
+      st.liveText = `Offene Karten: ${statusText(r)} Jede Wegnahme ist endgültig.`;
+      $('verdict').innerHTML = `<p>${st.liveText}</p>${hint}`;
+      if (mp.role === 'player') pres({ rm: Math.round(removedPct(st.L, st.conn) * 10) });   // Fortschritt für den Beamer
+    } else if (!mp.on && $('live').checked) {
       const r = FEM.analyze(st.L, st.solid);
       st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
       showFem(r, 0);
@@ -466,8 +482,16 @@
   }
 
   function undo() {
-    if (!st.undo.length || !editable()) return;
+    if (st.open || !st.undo.length || !editable()) return;
     st.solid = st.undo.pop(); st.phase = 'design'; refresh();
+  }
+
+  // Offene Karten: die letzte Wegnahme hat das Bauteil zum Versagen gebracht, das Spiel ist vorbei
+  function openFail() {
+    st.paint = null; st.drag = null;
+    if (mp.role === 'player') return playerBreak();
+    $('verdict').innerHTML = '<p>Rechnet …</p>';
+    runReveal(verdict);
   }
 
   function probe() {
@@ -722,7 +746,7 @@
   const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   const mp = { on: false, role: null, code: '', name: '', j: 0, rid: 0, sub: false, revealed: 0, own: null,
-    g: { rid: 0, ph: 'lobby', lv: 0, dur: 90, left: 0, pr: 2 }, pr: 0, tick: null, deadline: 0, revealTimer: null,
+    g: { rid: 0, ph: 'lobby', lv: 0, dur: 90, left: 0, pr: 2, mo: 'b' }, pr: 0, broken: false, tick: null, deadline: 0, revealTimer: null,
     snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false };
   let mpScr = '';
 
@@ -743,7 +767,7 @@
     if (!g || typeof g !== 'object' || !Number.isInteger(g.rid) || g.rid < 0) return null;
     if (!['lobby', 'design', 'reveal'].includes(g.ph) || !Number.isInteger(g.lv) || !LEVELS[g.lv]) return null;
     return { rid: g.rid, ph: g.ph, lv: g.lv, dur: Number(g.dur) || 90, left: Math.max(0, Math.min(999, Math.round(Number(g.left) || 0))),
-      pr: Math.max(0, Math.min(9, Math.round(Number(g.pr) || 0))) };
+      pr: Math.max(0, Math.min(9, Math.round(Number(g.pr) || 0))), mo: g.mo === 'o' ? 'o' : 'b' };
   }
   const hostG = () => { const h = hostPeer(); return h ? validG(h.presence.g) : null; };
   const validRes = res => (Array.isArray(res) ? res : [])
@@ -764,21 +788,29 @@
     mpSync();
   }
   function startPlayerRound(g) {
-    Object.assign(mp, { rid: g.rid, sub: false, own: null, pr: g.pr });
+    st.open = g.mo === 'o';
+    Object.assign(mp, { rid: g.rid, sub: false, broken: false, own: null, pr: st.open ? 0 : g.pr });
+    pres({ r: g.rid, s: 0, d: null, pu: 0, rm: 0, x: 0 });
     loadLevel(g.lv);
-    st.probes = g.pr;
+    st.probes = mp.pr;
     st.probeText = '';
-    pres({ r: g.rid, s: 0, d: null, pu: 0 });
     panel();
   }
   function playerSubmit() {
     if (mp.role !== 'player' || mp.sub || !editable()) return;
     mp.sub = true;
-    // auch direkt nach einer Probe-Rechnung: gesperrt wird der Entwurf wieder ohne Spannungen gezeigt
-    Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1, view: { mode: 'blind' } });
-    $('legend').hidden = true; $('femline').textContent = '';
-    pres({ r: mp.rid, s: 1, d: encode(st.solid) });
+    Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1 });
+    // blind: auch direkt nach einer Probe-Rechnung wird der Entwurf wieder ohne Spannungen gezeigt
+    if (!st.open) { st.view = { mode: 'blind' }; $('legend').hidden = true; $('femline').textContent = ''; }
+    pres({ r: mp.rid, s: 1, d: encode(st.solid), rm: Math.round(removedPct(st.L, st.conn) * 10) });
     controls(); render(); mpRender();
+  }
+  // Offene Karten im Wettkampf: das Bauteil ist gebrochen, die Person ist in dieser Runde raus
+  function playerBreak() {
+    Object.assign(mp, { sub: true, broken: true });
+    pres({ r: mp.rid, s: 1, x: 1, d: encode(st.solid) });
+    runReveal(r => { mp.own = r; mpRender(); });
+    mpRender();
   }
   function playerSync() {
     const g = hostG();
@@ -789,13 +821,15 @@
     } else if (g.ph === 'reveal' && g.rid === mp.rid && mp.revealed !== g.rid) {
       mp.revealed = g.rid;
       st.paint = null; st.drag = null;
-      runReveal(r => { mp.own = r; mpRender(); });
+      if (mp.broken) mpRender();   // der Einsturz lief schon während der Runde
+      else runReveal(r => { mp.own = r; mpRender(); });
     }
   }
 
   // ---------- Wettkampf: Spielleitung ----------
   const scoreList = () => Object.values(mp.scores).sort((a, b) => b.pts - a.pts).slice(0, 10).map(s => [s.name, Math.round(s.pts * 10)]);
-  const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, dur: mp.g.dur, pr: mp.g.pr, scores: mp.scores, t: Date.now() });
+  const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, dur: mp.g.dur, pr: mp.g.pr, mo: mp.g.mo,
+    scores: mp.scores, t: Date.now() });
   function savedHost() {
     const h = store.get('host');
     return h && typeof h.code === 'string' && Date.now() - h.t < 6 * 3600e3 ? h : null;
@@ -805,17 +839,19 @@
     Object.assign(mp, { role: 'host', code: r ? normCode(r.code) : newCode(), j: Date.now(), snap: null, order: null,
       scores: r && r.scores && typeof r.scores === 'object' ? r.scores : {},
       g: { rid: r ? r.rid | 0 : 0, ph: 'lobby', lv: r && LEVELS[r.lv] ? r.lv : 0, dur: r ? r.dur || 90 : 90, left: 0,
-        pr: r && Number.isInteger(r.pr) ? r.pr : 2 } });
+        pr: r && Number.isInteger(r.pr) ? r.pr : 2, mo: r && r.mo === 'o' ? 'o' : 'b' } });
+    st.open = false;   // die Spielleitung zeigt das Bauteil ohne Spannungen
     loadLevel(mp.g.lv);
     st.phase = 'locked';
     pres({ k: mp.code, h: 1, n: 'Spielleitung', j: mp.j, g: { ...mp.g }, sc: scoreList() });
     saveHost(); mpSync();
   }
   function hostStart() {
-    const lv = +$('mp-lv').value, dur = +$('mp-dur').value, pr = +$('mp-pr').value;
-    Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, dur, left: dur, pr });
+    const lv = +$('mp-lv').value, dur = +$('mp-dur').value, pr = +$('mp-pr').value, mo = $('mp-mo').value === 'o' ? 'o' : 'b';
+    Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, dur, left: dur, pr, mo });
     Object.assign(mp, { deadline: performance.now() + dur * 1000, snap: null, order: null });
     stopBoard();
+    st.open = false;
     loadLevel(lv);
     st.phase = 'locked';
     pres({ g: { ...mp.g }, res: null });
@@ -903,7 +939,7 @@
       card.dataset.open = String(open);
       drawMini(card.querySelector('canvas'), st.L, e.solid, open ? e.res : null);
       card.querySelector('.vl').textContent = !open ? ''
-        : `${fmt(e.rem, 1)} % entfernt` + (mp.g.pr ? `, ${e.pu === 1 ? '1 Probe' : `${e.pu} Proben`}` : '');
+        : `${fmt(e.rem, 1)} % entfernt` + (mp.g.mo !== 'o' && mp.g.pr ? `, ${e.pu === 1 ? '1 Probe' : `${e.pu} Proben`}` : '');
       if (open && !card.querySelector('.st')) {
         const s = document.createElement('div');
         s.className = 'st ' + (e.ok ? 'ok' : 'bad');
@@ -995,7 +1031,12 @@
       <p>Raum <b>${esc(mp.code)}</b>, Sie spielen als <b>${esc(mp.name)}</b>.</p>
       <p id="mp-msg"></p>
       <button class="btn" type="button" data-act="leave">Raum verlassen</button>`,
-    'p-design': () => `<p class="mp-net" id="mp-net"></p>
+    'p-design': () => st.open ? `<p class="mp-net" id="mp-net"></p>
+      <p><b>Runde ${mp.rid}: ${lvName(st.li)}, offene Karten.</b> Sie sehen die Spannungen. Jede Wegnahme ist endgültig.
+        Versagt Ihr Bauteil, sind Sie raus. Hören Sie rechtzeitig auf.</p>
+      <div class="actions"><button class="btn primary" type="button" data-act="submit">Aufhören und werten</button></div>
+      <p id="mp-probe"></p>
+      <p id="mp-msg"></p>` : `<p class="mp-net" id="mp-net"></p>
       <p><b>Runde ${mp.rid}: ${lvName(st.li)}.</b> Entfernen Sie Material, bis die Zeit abläuft. Wer zu viel wegnimmt, bricht.
         Wer zu wenig wegnimmt, verliert gegen die anderen.${mp.pr ? ` Mit ${mp.pr === 1 ? 'einer Probe-Rechnung' : `${mp.pr} Probe-Rechnungen`}
         sehen Sie die Spannungen Ihres aktuellen Entwurfs.` : ''}</p>
@@ -1008,7 +1049,8 @@
       <p id="mp-probe"></p>
       <p id="mp-msg"></p>`,
     'p-locked': () => `<p class="mp-net" id="mp-net"></p>
-      <p><b>Abgegeben.</b> Die Auflösung startet, sobald alle fertig sind oder die Zeit abläuft.</p>
+      <p>${mp.broken ? '<span class="t-bad">Bruch.</span> Ihr Bauteil hat versagt, Sie sind in dieser Runde raus.' : '<b>Abgegeben.</b>'}
+        Die Auflösung startet, sobald alle fertig sind oder die Zeit abläuft.</p>
       <p id="mp-msg"></p>`,
     'p-result': () => `<p class="mp-net" id="mp-net"></p>
       <div id="mp-result"></div>
@@ -1021,15 +1063,18 @@
         <label class="field">Bauteil<select id="mp-lv">${LEVELS.map((d, i) => `<option value="${i}">${i + 1} ${esc(d.name)}</option>`).join('')}</select></label>
         <label class="field">Zeit<select id="mp-dur">${[60, 90, 120, 180].map(s => `<option value="${s}">${mmss(s)} min</option>`).join('')}</select></label>
       </div>
+      <label class="field">Spielart<select id="mp-mo"><option value="b">Blind, mit Probe-Rechnungen</option><option value="o">Offene Karten</option></select></label>
       <label class="field">Probe-Rechnungen je Person<select id="mp-pr">${[0, 1, 2, 3, 5].map(n => `<option value="${n}">${n ? n : 'keine, nur blind'}</option>`).join('')}</select></label>
       <button class="btn primary" type="button" data-act="start">Runde ${mp.g.rid + 1} starten</button>
       <h3>Gesamtwertung</h3><div id="mp-score"></div>
       <button class="btn" type="button" data-act="end">Spiel beenden</button>`,
     'h-design': () => `<p class="mp-net" id="mp-net"></p>
-      <p><b>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</b> läuft, ${mp.g.pr ? `je Person ${mp.g.pr === 1 ? 'eine Probe-Rechnung' : `${mp.g.pr} Probe-Rechnungen`}` : 'ohne Probe-Rechnung'}.</p>
+      <p><b>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</b> läuft, ${mp.g.mo === 'o' ? 'offene Karten'
+        : mp.g.pr ? `je Person ${mp.g.pr === 1 ? 'eine Probe-Rechnung' : `${mp.g.pr} Probe-Rechnungen`}` : 'ohne Probe-Rechnung'}.</p>
       <p id="mp-msg"></p>
       <ul class="chips" id="mp-chips"></ul>
-      ${mp.g.pr ? '<p class="mp-note">Punkte hinter den Namen: gefüllt heißt Probe verbraucht. Grün heißt abgegeben.</p>' : ''}
+      ${mp.g.mo === 'o' ? '<p class="mp-note">Zahl hinter dem Namen: bisher entfernt. Grün heißt aufgehört, rot heißt Bruch.</p>'
+        : mp.g.pr ? '<p class="mp-note">Punkte hinter den Namen: gefüllt heißt Probe verbraucht. Grün heißt abgegeben.</p>' : ''}
       <button class="btn primary" type="button" data-act="now">Jetzt auflösen</button>`,
     'h-reveal': () => `<p class="mp-net" id="mp-net"></p>
       <p><b>Auflösung Runde ${mp.g.rid}.</b> Die Entwürfe werden nacheinander aufgedeckt, der gewagteste zuletzt.</p>
@@ -1041,7 +1086,7 @@
       <ol class="steps">
         <li>Die Spielleitung eröffnet ein Spiel und zeigt den Raumcode.</li>
         <li>Alle treten mit Namen und Code bei und bekommen dasselbe Bauteil.</li>
-        <li>Bis die Zeit abläuft, entfernt jede Person blind Material.</li>
+        <li>Bis die Zeit abläuft, entfernt jede Person Material: blind mit Probe-Rechnungen oder mit offenen Karten, bei denen ein Bruch sofort ausscheidet.</li>
         <li>Dann rechnet die FEM alle Entwürfe. Wer bricht, bekommt nichts, sonst zählt jedes entfernte Prozent.</li>
       </ol>`,
     'p-wait': () => `<h2>Raum ${esc(mp.code)}</h2><p id="mp-wait"></p><ul class="chips" id="mp-chips"></ul>`,
@@ -1079,6 +1124,10 @@
         $('mp-lv').value = String(mp.g.rid ? (mp.g.lv + 1) % LEVELS.length : mp.g.lv);
         $('mp-dur').value = String(mp.g.dur);
         $('mp-pr').value = String(mp.g.pr);
+        $('mp-mo').value = mp.g.mo;
+        const syncPr = () => { $('mp-pr').disabled = $('mp-mo').value === 'o'; };   // offene Karten brauchen keine Proben
+        $('mp-mo').onchange = syncPr;
+        syncPr();
       }
       if (scr === 'h-reveal') showCards(true);
       if (show) requestAnimationFrame(() => { if (wrap.clientWidth) { layout(); render(); } });
@@ -1094,7 +1143,13 @@
     const done = p => p.presence.r === rid && p.presence.s === 1;
     // auf dem Beamer während der Runde: je Probe-Rechnung ein Punkt, gefüllt wenn verbraucht
     const dots = p => Array.from({ length: mp.g.pr }, (_, i) => `<i class="pd${i < (p.presence.r === rid ? probesUsed(p.presence) : 0) ? ' on' : ''}"></i>`).join('');
-    const chips = mark => ps.map(p => `<li class="${mark && done(p) ? 'done' : ''}">${esc(clean(p.presence.n, 16) || 'Jemand')}${mark ? dots(p) : ''}</li>`).join('');
+    // offene Karten: bisher entfernte Prozent, rot bei Bruch
+    const broke = p => p.presence.r === rid && p.presence.x === 1;
+    const openInfo = p => p.presence.r !== rid ? '' : broke(p) ? ': Bruch'
+      : `: ${fmt(Math.max(0, Math.min(1000, Number(p.presence.rm) || 0)) / 10, 0)} %`;
+    const open = mp.g.mo === 'o';
+    const chips = mark => ps.map(p => `<li class="${mark && done(p) ? (open && broke(p) ? 'out' : 'done') : ''}">`
+      + `${esc(clean(p.presence.n, 16) || 'Jemand')}${!mark ? '' : open ? openInfo(p) : dots(p)}</li>`).join('');
     let left = null;
     if (scr === 'h-design') left = mp.g.left;
     if (scr === 'p-design' || scr === 'p-locked') { const g = hostG(); left = g ? g.left : null; }
@@ -1117,9 +1172,8 @@
     if (scr === 'p-design' || scr === 'p-locked') set('mp-msg', `${ps.filter(done).length + (mp.sub ? 1 : 0)} von ${ps.length + 1} haben abgegeben.`);
     if (scr === 'p-design') {
       const b = $('mp-probe-btn');
-      b.textContent = `Probe-Rechnung (${st.probes})`;
-      b.disabled = !st.probes || !editable();
-      set('mp-probe', st.phase === 'probe' && st.probeText ? esc(st.probeText) : '');
+      if (b) { b.textContent = `Probe-Rechnung (${st.probes})`; b.disabled = !st.probes || !editable(); }
+      set('mp-probe', st.open ? esc(st.liveText || '') : st.phase === 'probe' && st.probeText ? esc(st.probeText) : '');
     }
     if (scr === 'p-result') {
       const h = hostPeer(), g = hostG(), res = h && g && g.rid === mp.rid ? validRes(h.presence.res) : [];
@@ -1142,7 +1196,9 @@
       set('mp-warn', mp.conflict ? 'In diesem Raum leitet schon jemand anderes. Bitte ein neues Spiel eröffnen.' : '');
     }
     if (scr === 'h-design') {
-      set('mp-msg', `${ps.filter(done).length} von ${ps.length} haben abgegeben.`);
+      const nb = ps.filter(broke).length;
+      set('mp-msg', open ? `${ps.filter(done).length} von ${ps.length} fertig${nb ? `, davon ${nb} mit Bruch` : ''}.`
+        : `${ps.filter(done).length} von ${ps.length} haben abgegeben.`);
       set('mp-chips', chips(true));
     }
     if (scr === 'h-reveal' && mp.order && mp.shown >= mp.order.length) {
@@ -1162,6 +1218,7 @@
     if (on) { mpScr = ''; netStart(); mpRender(); return; }
     leaveRoom(false);
     $('drawing').hidden = false; $('mp-board').hidden = true; $('timer').hidden = true; $('tools').hidden = false;
+    st.open = soloOpen;
     loadLevel(st.li);
   }
 
@@ -1202,7 +1259,7 @@
     if (st.tool === 'brush' && (!L.domain[k] || L.frozen[k])) { if (L.frozen[k]) lockedMsg(); return; }
     e.preventDefault();
     cv.setPointerCapture(e.pointerId);
-    st.paint = L.domain[k] && !L.frozen[k] && !st.solid[k] ? 1 : 0;
+    st.paint = !st.open && L.domain[k] && !L.frozen[k] && !st.solid[k] ? 1 : 0;   // offene Karten: nur wegnehmen
     if (st.tool === 'rect') { const c = cell(e); st.drag = { a: c, b: c, k }; render(); return; }
     pushUndo();
     st.last = [e.clientX, e.clientY];
@@ -1257,7 +1314,7 @@
   $('b-probe').onclick = probe;
   $('b-undo').onclick = undo;
   function resetAll() {
-    if (!editable() || st.solid.every((x, k) => x === st.L.domain[k])) return;
+    if (st.open || !editable() || st.solid.every((x, k) => x === st.L.domain[k])) return;
     st.undo.push(st.solid.slice()); st.solid = st.L.domain.slice(); st.phase = 'design'; refresh();
   }
   $('b-reset').onclick = resetAll;
@@ -1269,6 +1326,17 @@
   $('b-eso').onclick = toggleEso;
   $('b-next').onclick = () => { if (!st.busy) loadLevel((st.li + 1) % LEVELS.length); };
   $('live').onchange = () => { if (editable()) { st.phase = 'design'; refresh(); } };
+  // Spielart allein: Wechsel beginnt das Bauteil neu
+  const setOpen = on => {
+    if (st.busy) return;
+    soloOpen = st.open = on;
+    $('g-blind').setAttribute('aria-pressed', String(!on));
+    $('g-open').setAttribute('aria-pressed', String(on));
+    $('live').checked = false;
+    loadLevel(st.li);
+  };
+  $('g-blind').onclick = () => setOpen(false);
+  $('g-open').onclick = () => setOpen(true);
 
   $('levels').innerHTML = LEVELS.map((d, i) => `<button type="button" data-i="${i}">${i + 1} ${d.name}</button>`).join('');
   $('levels').onclick = e => { const b = e.target.closest('button'); if (b) loadLevel(+b.dataset.i); };

@@ -107,6 +107,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .chips li { border: 1.5px solid var(--rule); padding: 4px 10px; font-weight: 600; }
 .chips li.done { border-color: var(--ok); color: var(--ok); }
+.chips li.out { border-color: var(--bad); color: var(--bad); }
 .chips .pd { display: inline-block; width: 9px; height: 9px; margin-left: 5px; border: 1.5px solid currentColor; border-radius: 50%; vertical-align: 0; }
 .chips .pd.on { background: currentColor; }
 .mp-note { font-size: 13px; color: var(--ink2); }
@@ -150,9 +151,12 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
     <section class="sheet" aria-label="Zeichnung">
       <div id="drawing">
         <div class="sheet-head">
-          <p class="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
+          <p class="howto" id="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
             Mit dem <b>Pinsel</b> überstreichen Sie Kacheln, etwa für schräge Streben. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
             Kreuzschraffierte Kacheln sind gesperrt. Beim Abgeben rechnet die FEM: Hält das Bauteil, zählt jedes entfernte Gramm, versagt es, zählt nichts.</p>
+          <p class="howto" id="howto-open" hidden><b>Offene Karten:</b> Nach jeder Wegnahme rechnet die FEM und zeigt die Spannungen.
+            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln.
+            Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
             <button type="button" id="t-rect" aria-pressed="true">Rechteck</button>
             <button type="button" id="t-brush" aria-pressed="false">Pinsel</button>
@@ -184,6 +188,10 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
       </table>
 
       <div id="solo-ui" class="side">
+        <div class="tools" role="group" aria-label="Spielart">
+          <button type="button" id="g-blind" aria-pressed="true">Blind</button>
+          <button type="button" id="g-open" aria-pressed="false">Offene Karten</button>
+        </div>
         <div class="actions" id="act-design">
           <button class="btn primary" id="b-submit" type="button">Abgeben und rechnen</button>
           <button class="btn" id="b-probe" type="button">Probe-Rechnung</button>
@@ -198,7 +206,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 
         <div class="verdict" id="verdict" aria-live="polite"></div>
 
-        <label class="live"><input type="checkbox" id="live"> Spannungen live zeigen (Übungsmodus)</label>
+        <label class="live" id="live-row"><input type="checkbox" id="live"> Spannungen live zeigen (Übungsmodus)</label>
 
         <details class="rules">
           <summary>So wird gerechnet</summary>
