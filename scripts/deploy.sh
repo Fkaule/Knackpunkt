@@ -14,7 +14,7 @@ if [ "$1" != "--force" ] && [ -n "$RUNNING" ] && [ "$RUNNING" -gt 0 ]; then
   echo "Abbruch: Es läuft gerade eine Runde. Später erneut versuchen oder --force."
   exit 1
 fi
-tar czf - Dockerfile .dockerignore package.json package-lock.json server.mjs game.html deploy/nginx-knackpunkt-location.conf \
+tar --no-xattrs -czf - Dockerfile .dockerignore package.json package-lock.json server.mjs game.html deploy/nginx-knackpunkt-location.conf \
   | ssh "$HOST" 'mkdir -p ~/knackpunkt && tar xzf - -C ~/knackpunkt'
 ssh "$HOST" "cd ~/knackpunkt && docker build -q -t knackpunkt . \
   && (docker rm -f knackpunkt >/dev/null 2>&1 || true) \
