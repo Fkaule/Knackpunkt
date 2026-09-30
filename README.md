@@ -22,8 +22,8 @@ flowchart TD
 
 ### 1. Modell
 
-- Das Bauteil ist eine ebene Scheibe der Dicke $t = 10\,\mathrm{mm}$ aus Stahl S235: $E = 210\,000\,\mathrm{MPa}$, $\nu = 0{,}3$, $R_e = 235\,\mathrm{MPa}$.
-- Es besteht aus Kacheln von $10 \times 10\,\mathrm{mm}$. Jede Kachel ist mit $4 \times 4$ quadratischen Elementen der Kantenlänge $h = 2{,}5\,\mathrm{mm}$ vernetzt. Das Netz ist fest: Jeder Entwurf wird auf demselben Raster gerechnet.
+- Das Bauteil ist eine ebene Scheibe der Dicke $`t = 10\,\mathrm{mm}`$ aus Stahl S235: $`E = 210\,000\,\mathrm{MPa}`$, $`\nu = 0{,}3`$, $`R_e = 235\,\mathrm{MPa}`$.
+- Es besteht aus Kacheln von $`10 \times 10\,\mathrm{mm}`$. Jede Kachel ist mit $`4 \times 4`$ quadratischen Elementen der Kantenlänge $`h = 2{,}5\,\mathrm{mm}`$ vernetzt. Das Netz ist fest: Jeder Entwurf wird auf demselben Raster gerechnet.
 - Eine entfernte Kachel fehlt im Modell ganz. Es gibt keine weiche Ersatzsteifigkeit wie bei der Topologieoptimierung.
 - Annahmen: linear elastisch, kleine Verformungen, statisch, ebener Spannungszustand. Nicht berücksichtigt: Eigengewicht, Knicken und Beulen, Plastizität.
 
@@ -43,49 +43,49 @@ Kachel (10 mm) = 4 x 4 Elemente        ein Element (h = 2,5 mm)
 
 ### 2. Werkstoffgesetz
 
-Hooke im ebenen Spannungszustand mit $\boldsymbol\sigma = (\sigma_x, \sigma_y, \tau_{xy})^T$ und $\boldsymbol\varepsilon = (\varepsilon_x, \varepsilon_y, \gamma_{xy})^T$:
+Hooke im ebenen Spannungszustand mit $`\boldsymbol\sigma = (\sigma_x, \sigma_y, \tau_{xy})^T`$ und $`\boldsymbol\varepsilon = (\varepsilon_x, \varepsilon_y, \gamma_{xy})^T`$:
 
-$$
+```math
 \boldsymbol\sigma = \mathbf D\,\boldsymbol\varepsilon, \qquad
 \mathbf D = \frac{E}{1-\nu^2}\begin{bmatrix} 1 & \nu & 0 \\ \nu & 1 & 0 \\ 0 & 0 & \frac{1-\nu}{2} \end{bmatrix}
-$$
+```
 
 ### 3. Element: Viereck mit inkompatiblen Moden
 
 Ein normales bilineares Viereckelement (Q4) ist bei Biegung viel zu steif (Schubversteifung, „shear locking“). Das wäre hier fatal, denn die Stäbe im Spiel sind oft nur eine Kachel breit, also vier Elemente dick. Deshalb bekommt jedes Element vier zusätzliche innere Verschiebungsmoden (Q6 nach Wilson, als QM6 nach Taylor), mit denen ein Rechteckelement reine Biegung exakt abbilden kann.
 
-Verschiebungen im Element mit den natürlichen Koordinaten $\xi, \eta \in [-1, 1]$ und den Eckknoten $(\xi_i, \eta_i) = (\pm 1, \pm 1)$:
+Verschiebungen im Element mit den natürlichen Koordinaten $`\xi, \eta \in [-1, 1]`$ und den Eckknoten $`(\xi_i, \eta_i) = (\pm 1, \pm 1)`$:
 
-$$
+```math
 u = \sum_{i=1}^{4} N_i\,u_i + (1-\xi^2)\,\alpha_1 + (1-\eta^2)\,\alpha_2, \qquad
 v = \sum_{i=1}^{4} N_i\,v_i + (1-\xi^2)\,\alpha_3 + (1-\eta^2)\,\alpha_4
-$$
+```
 
-$$
+```math
 N_i = \tfrac14\,(1+\xi_i\,\xi)(1+\eta_i\,\eta)
-$$
+```
 
-Damit gilt $\boldsymbol\varepsilon = \mathbf B\,\mathbf u_e + \mathbf G\,\boldsymbol\alpha$ mit den acht Knotenverschiebungen $\mathbf u_e$, der üblichen Matrix $\mathbf B$ des Q4-Elements und
+Damit gilt $`\boldsymbol\varepsilon = \mathbf B\,\mathbf u_e + \mathbf G\,\boldsymbol\alpha`$ mit den acht Knotenverschiebungen $`\mathbf u_e`$, der üblichen Matrix $`\mathbf B`$ des Q4-Elements und
 
-$$
+```math
 \mathbf G = \frac{2}{h}\begin{bmatrix} -2\xi & 0 & 0 & 0 \\ 0 & 0 & 0 & -2\eta \\ 0 & -2\eta & -2\xi & 0 \end{bmatrix}
-$$
+```
 
-Die Teilmatrizen werden mit $2 \times 2$ Gauß-Punkten integriert, mit $\mathrm dA = \tfrac{h^2}{4}\,\mathrm d\xi\,\mathrm d\eta$:
+Die Teilmatrizen werden mit $`2 \times 2`$ Gauß-Punkten integriert, mit $`\mathrm dA = \tfrac{h^2}{4}\,\mathrm d\xi\,\mathrm d\eta`$:
 
-$$
+```math
 \mathbf K_{uu} = \int \mathbf B^T \mathbf D\,\mathbf B\,t\,\mathrm dA, \qquad
 \mathbf K_{u\alpha} = \int \mathbf B^T \mathbf D\,\mathbf G\,t\,\mathrm dA, \qquad
 \mathbf K_{\alpha\alpha} = \int \mathbf G^T \mathbf D\,\mathbf G\,t\,\mathrm dA
-$$
+```
 
 Die inneren Moden gehören zu keinem Nachbarelement und werden statisch kondensiert:
 
-$$
+```math
 \mathbf K_e = \mathbf K_{uu} - \mathbf K_{u\alpha}\,\mathbf K_{\alpha\alpha}^{-1}\,\mathbf K_{u\alpha}^T
-$$
+```
 
-Alle Elemente sind gleich große Quadrate, deshalb wird $\mathbf K_e$ nur einmal berechnet. Beim Quadrat hängt $\mathbf K_e$ nicht von $h$ ab, weil $\mathbf B \sim 1/h$ und $\mathrm dA \sim h^2$. In ANSYS entspricht das Element etwa PLANE182 mit Enhanced Strain (KEYOPT(1) = 2) im ebenen Spannungszustand mit Dicke.
+Alle Elemente sind gleich große Quadrate, deshalb wird $`\mathbf K_e`$ nur einmal berechnet. Beim Quadrat hängt $`\mathbf K_e`$ nicht von $`h`$ ab, weil $`\mathbf B \sim 1/h`$ und $`\mathrm dA \sim h^2`$. In ANSYS entspricht das Element etwa PLANE182 mit Enhanced Strain (KEYOPT(1) = 2) im ebenen Spannungszustand mit Dicke.
 
 ### 4. Gesamtsystem
 
@@ -96,33 +96,33 @@ Alle Elemente sind gleich große Quadrate, deshalb wird $\mathbf K_e$ nur einmal
 - Gerechnet werden nur Kacheln, die mit einer Lastkachel verbunden sind. Totes Material am Lager trägt nichts.
 - Berühren sich zwei Kacheln nur an einer Ecke, bekommen sie dort getrennte Knoten. Real hat dieser Kontakt keinen Querschnitt, im FE-Modell wäre er ein Gelenk, das Kraft überträgt.
 
-**Aufbau und Randbedingungen.** $\mathbf K = \sum_e \mathbf K_e$ nach üblicher Assemblierung, dann $\mathbf K\,\mathbf u = \mathbf f$.
+**Aufbau und Randbedingungen.** $`\mathbf K = \sum_e \mathbf K_e`$ nach üblicher Assemblierung, dann $`\mathbf K\,\mathbf u = \mathbf f`$.
 
-- Lager sperren Freiheitsgrade an allen fünf Knoten einer Kachelkante: Einspannung und Festlager $u = v = 0$, Loslager nur $v = 0$. Gesperrte Freiheitsgrade werden aus dem System gestrichen.
-- Die Last $F$ wirkt als gleichmäßige Linienlast auf der Kante der Lastkachel, nicht als Punktlast, damit am Lastangriff keine Singularität entsteht. Bei $n$ belasteten Elementkanten bekommt jede Kante $F/n$, je zur Hälfte an ihre beiden Endknoten (konsistente Knotenkräfte für lineare Ansätze).
+- Lager sperren Freiheitsgrade an allen fünf Knoten einer Kachelkante: Einspannung und Festlager $`u = v = 0`$, Loslager nur $`v = 0`$. Gesperrte Freiheitsgrade werden aus dem System gestrichen.
+- Die Last $`F`$ wirkt als gleichmäßige Linienlast auf der Kante der Lastkachel, nicht als Punktlast, damit am Lastangriff keine Singularität entsteht. Bei $`n`$ belasteten Elementkanten bekommt jede Kante $`F/n`$, je zur Hälfte an ihre beiden Endknoten (konsistente Knotenkräfte für lineare Ansätze).
 
-**Lösen.** $\mathbf K$ ist symmetrisch und positiv definit, solange die Lager jede Starrkörperbewegung verhindern. Die Knoten sind entlang der kurzen Bauteilseite nummeriert. Dadurch ist $\mathbf K$ eine Bandmatrix mit der halben Bandbreite $b \approx 2\,(n_y + 2)$, wobei $n_y$ die Zahl der Elemente über die kurze Seite ist. Gelöst wird mit Cholesky $\mathbf K = \mathbf U^T \mathbf U$ im Bandspeicher (Aufwand $\sim n\,b^2$) und Vorwärts- und Rückwärtseinsetzen. Beim vollen Kragarm sind das 2048 Elemente und 4224 Freiheitsgrade, gelöst in etwa 15 ms.
+**Lösen.** $`\mathbf K`$ ist symmetrisch und positiv definit, solange die Lager jede Starrkörperbewegung verhindern. Die Knoten sind entlang der kurzen Bauteilseite nummeriert. Dadurch ist $`\mathbf K`$ eine Bandmatrix mit der halben Bandbreite $`b \approx 2\,(n_y + 2)`$, wobei $`n_y`$ die Zahl der Elemente über die kurze Seite ist. Gelöst wird mit Cholesky $`\mathbf K = \mathbf U^T \mathbf U`$ im Bandspeicher (Aufwand $`\sim n\,b^2`$) und Vorwärts- und Rückwärtseinsetzen. Beim vollen Kragarm sind das 2048 Elemente und 4224 Freiheitsgrade, gelöst in etwa 15 ms.
 
-**Starrkörperbewegung.** Wird bei der Zerlegung ein Pivot kleiner als $10^{-7}\,K_{e,11}$, ist $\mathbf K$ singulär: Das Restbauteil kann sich bewegen, etwa eine Brücke, die nur noch auf dem Loslager steht. Das zählt als Versagen (Mechanismus).
+**Starrkörperbewegung.** Wird bei der Zerlegung ein Pivot kleiner als $`10^{-7}\,K_{e,11}`$, ist $`\mathbf K`$ singulär: Das Restbauteil kann sich bewegen, etwa eine Brücke, die nur noch auf dem Loslager steht. Das zählt als Versagen (Mechanismus).
 
 ### 5. Nachweis
 
-Die Spannungen werden im Mittelpunkt jedes Elements ausgewertet. Dort verschwinden die Ableitungen der inkompatiblen Moden, $\mathbf G(0,0) = \mathbf 0$, also gilt
+Die Spannungen werden im Mittelpunkt jedes Elements ausgewertet. Dort verschwinden die Ableitungen der inkompatiblen Moden, $`\mathbf G(0,0) = \mathbf 0`$, also gilt
 
-$$
+```math
 \boldsymbol\sigma_e = \mathbf D\,\mathbf B(0,0)\,\mathbf u_e
-$$
+```
 
-Vergleichsspannung nach von Mises im ebenen Spannungszustand und Auslastung $A_k$ einer Kachel $k$ als Mittelwert über ihre 16 Elemente:
+Vergleichsspannung nach von Mises im ebenen Spannungszustand und Auslastung $`A_k`$ einer Kachel $`k`$ als Mittelwert über ihre 16 Elemente:
 
-$$
+```math
 \sigma_v = \sqrt{\sigma_x^2 - \sigma_x\,\sigma_y + \sigma_y^2 + 3\,\tau_{xy}^2}, \qquad
 A_k = \frac{1}{16\,R_e}\sum_{e \in k} \sigma_{v,e}
-$$
+```
 
-Der Entwurf hält, wenn $\max_k A_k \le 1$ gilt, die Last einen Weg zum Lager hat und keine Starrkörperbewegung möglich ist.
+Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager hat und keine Starrkörperbewegung möglich ist.
 
-**Warum gemittelt wird.** Jede entfernte Kachel erzeugt einspringende 90°-Ecken. In der linearen Elastizitätstheorie ist die Spannung dort singulär ($\sigma \sim r^{-0{,}46}$), der Spitzenwert hängt also nur vom Netz ab. Der Mittelwert über eine Kachel ist dagegen eine stabile Größe und entspricht grob einer Spannungsmittelung nach Neuber. Für duktilen Stahl ist das vertretbar: Örtliche Spitzen dürfen fließen, entscheidend ist, ob der Querschnitt trägt.
+**Warum gemittelt wird.** Jede entfernte Kachel erzeugt einspringende 90°-Ecken. In der linearen Elastizitätstheorie ist die Spannung dort singulär ($`\sigma \sim r^{-0{,}46}`$), der Spitzenwert hängt also nur vom Netz ab. Der Mittelwert über eine Kachel ist dagegen eine stabile Größe und entspricht grob einer Spannungsmittelung nach Neuber. Für duktilen Stahl ist das vertretbar: Örtliche Spitzen dürfen fließen, entscheidend ist, ob der Querschnitt trägt.
 
 **Was das für die Prüfung heißt.** Die Kachelmittelung ist eine Spielregel, kein Normnachweis:
 
@@ -132,11 +132,11 @@ Der Entwurf hält, wenn $\max_k A_k \le 1$ gilt, die Last einen Weg zum Lager ha
 
 ### 6. Wertung
 
-$$
+```math
 \text{entfernt} = 1 - \frac{\text{Kacheln mit Verbindung zu einem Lager}}{\text{Kacheln des Vollteils}}
-$$
+```
 
-Die Punkte sind die entfernten Prozent, bei Versagen 0. Masse je Kachel: $1\,\mathrm{cm^3} \cdot 7{,}85\,\mathrm{g/cm^3} = 7{,}85\,\mathrm g$.
+Die Punkte sind die entfernten Prozent, bei Versagen 0. Masse je Kachel: $`1\,\mathrm{cm^3} \cdot 7{,}85\,\mathrm{g/cm^3} = 7{,}85\,\mathrm g`$.
 
 ### 7. Gegner: Evolutionäre Strukturoptimierung (ESO)
 
@@ -158,13 +158,13 @@ Gesperrt und nicht entfernbar sind die Lastkacheln und die Kacheln unter Fest- u
 
 `npm test` rechnet einen schlanken Kragbalken (Länge 320 mm, Last 1 kN als Linienlast am freien Ende) und vergleicht die Durchbiegung mit dem Timoshenko-Balken
 
-$$
+```math
 w = \frac{F L^3}{3 E I} + \frac{F L}{\kappa\,G A}, \qquad \kappa = \tfrac56, \qquad G = \frac{E}{2\,(1+\nu)}
-$$
+```
 
-sowie die Biegespannung im Elementmittelpunkt der obersten Elementreihe nahe der Balkenmitte mit $\sigma_x = M\,z/I$:
+sowie die Biegespannung im Elementmittelpunkt der obersten Elementreihe nahe der Balkenmitte mit $`\sigma_x = M\,z/I`$:
 
-| Höhe | Elemente über die Höhe | Durchbiegung FE | Theorie | Abweichung | $\sigma_x$ FE | Theorie | Abweichung |
+| Höhe | Elemente über die Höhe | Durchbiegung FE | Theorie | Abweichung | $`\sigma_x`$ FE | Theorie | Abweichung |
 |---|---|---|---|---|---|---|---|
 | 10 mm | 4 | 62,412 mm | 62,463 mm | -0,08 % | 714,35 MPa | 714,38 MPa | 0,00 % |
 | 20 mm | 8 | 7,815 mm | 7,826 mm | -0,13 % | 208,36 MPa | 208,36 MPa | 0,00 % |
@@ -177,7 +177,7 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 
 | Schritt | Stelle |
 |---|---|
-| Werkstoff, Element, Kondensation, Spannungsmatrix $\mathbf D\,\mathbf B(0,0)$ | Block `KE, S` am Anfang |
+| Werkstoff, Element, Kondensation, Spannungsmatrix $`\mathbf D\,\mathbf B(0,0)`$ | Block `KE, S` am Anfang |
 | Lager und Lasten als Knotenwerte, gesperrte Kacheln | `level()` |
 | Zusammenhang über Kanten | `connect()` |
 | Eckkontakt, Nummerierung, Assemblierung, Cholesky, Spannungen, Auslastung | `analyze()` |
