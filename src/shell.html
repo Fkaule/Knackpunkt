@@ -1,0 +1,223 @@
+<title>Knackpunkt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Big+Shoulders+Stencil:wght@800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: Zeichnungsblatt mit Rahmen links, Schriftfeld und Bedienung rechts; schmal untereinander.
+   Hell = Zeichenpapier, dunkel = Blaupause. */
+:root {
+  --paper: #e9edf0; --sheet: #fbfcfc; --ink: #16202a; --ink2: #4b5967; --rule: #c4ced7; --grid: #e1e7ec;
+  --steel: #c9d2da; --steel2: #8f9dab; --hatch: #5d6c7a; --accent: #1f5fbf; --on-accent: #ffffff;
+  --ok: #17804a; --bad: #c42f3a; --loose: #d64545; --stamp-blend: multiply;
+  --f-display: "Big Shoulders Stencil", "Barlow", Impact, sans-serif;
+  --f-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0a1d36; --sheet: #0f2748; --ink: #e6eef8; --ink2: #a3b8d2; --rule: #36557d; --grid: #183a63;
+    --steel: #4a6b94; --steel2: #88a6cb; --hatch: #cfddee; --accent: #7cc0ff; --on-accent: #0a1d36;
+    --ok: #57d492; --bad: #ff6f6f; --loose: #ff8a80; --stamp-blend: normal; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0a1d36; --sheet: #0f2748; --ink: #e6eef8; --ink2: #a3b8d2; --rule: #36557d; --grid: #183a63;
+  --steel: #4a6b94; --steel2: #88a6cb; --hatch: #cfddee; --accent: #7cc0ff; --on-accent: #0a1d36;
+  --ok: #57d492; --bad: #ff6f6f; --loose: #ff8a80; --stamp-blend: normal; color-scheme: dark;
+}
+body { background: var(--paper); color: var(--ink); font: 15px/1.45 var(--f-body); }
+[hidden] { display: none !important; }
+.app { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 18px 32px; display: grid; gap: 14px; }
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 22px; }
+.brand { font: 800 clamp(40px, 6vw, 60px)/0.85 var(--f-display); letter-spacing: 0.03em; text-transform: uppercase; margin: 0; }
+.claim { margin: 0 0 4px; color: var(--ink2); font-size: 16px; flex: 1 1 220px; text-wrap: balance; }
+.nav { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.levels, .modes, .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.levels button, .tools button, .modes button { font: 600 14px var(--f-body); color: var(--ink); background: transparent; border: 1.5px solid var(--rule);
+  padding: 7px 12px; border-radius: 2px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.levels button[aria-pressed="true"], .tools button[aria-pressed="true"], .modes button[aria-pressed="true"] {
+  border-color: var(--ink); background: var(--ink); color: var(--sheet); }
+.tools button:disabled { opacity: 0.4; cursor: not-allowed; }
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+@media (max-width: 880px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.sheet { background: var(--sheet); border: 2px solid var(--ink); outline: 1px solid var(--ink); outline-offset: 4px;
+  margin: 5px; padding: 14px 14px 12px; min-width: 0; }
+#drawing, .board { display: grid; gap: 8px; min-width: 0; }
+.sheet-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.howto { margin: 0; color: var(--ink2); font-size: 14px; max-width: 72ch; }
+.howto b { color: var(--ink); font-weight: 600; }
+.canvas-wrap { position: relative; min-width: 0; }
+canvas { display: block; touch-action: none; cursor: crosshair; }
+canvas.locked { cursor: default; }
+.stamp { position: absolute; top: 4%; right: 4%; pointer-events: none; font: 800 clamp(34px, 6vw, 64px)/1 var(--f-display);
+  letter-spacing: 0.08em; padding: 4px 16px 2px; border: 5px solid currentColor; border-radius: 6px;
+  transform: rotate(-8deg); opacity: 0.9; mix-blend-mode: var(--stamp-blend); }
+.stamp.ok { color: var(--ok); }
+.stamp.bad { color: var(--bad); }
+.stamp.hit { animation: stamp 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.25) both; }
+@keyframes stamp { from { transform: rotate(-8deg) scale(2.3); opacity: 0; } to { transform: rotate(-8deg) scale(1); opacity: 0.9; } }
+.timer { position: absolute; top: 6px; left: 6px; pointer-events: none; font: 600 clamp(22px, 3.4vw, 36px)/1 var(--f-mono);
+  padding: 6px 10px; border: 2px solid var(--ink); background: var(--sheet); color: var(--ink); font-variant-numeric: tabular-nums; }
+.timer.low { color: var(--bad); border-color: var(--bad); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font: 12px/1.2 var(--f-mono); color: var(--ink2); }
+.legend ol { display: flex; list-style: none; margin: 0; padding: 0; }
+.legend li { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+.legend i { display: block; width: clamp(18px, 3.4vw, 30px); height: 12px; }
+.legend li span { font-size: 10.5px; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+.legend .lg-t { font: 600 12px var(--f-body); color: var(--ink); }
+.femline { margin: 0; font: 12px/1.4 var(--f-mono); color: var(--ink2); min-height: 1.4em; font-variant-numeric: tabular-nums; }
+.side { display: grid; gap: 12px; min-width: 0; }
+.titleblock { width: 100%; border-collapse: collapse; background: var(--sheet); border: 2px solid var(--ink); font-size: 13px; }
+.titleblock th { text-align: left; font: 500 10.5px var(--f-body); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink2); padding: 6px 8px; border: 1px solid var(--rule); width: 36%; vertical-align: top; }
+.titleblock td { font-family: var(--f-mono); padding: 5px 8px; border: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+.titleblock td.big { font: 600 18px var(--f-mono); }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn { font: 600 14px var(--f-body); padding: 10px 12px; border: 2px solid var(--ink); background: var(--sheet); color: var(--ink);
+  border-radius: 2px; cursor: pointer; }
+#b-probe { grid-column: 1 / -1; }
+.btn.primary { grid-column: 1 / -1; background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-size: 16px; padding: 12px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:focus-visible, .levels button:focus-visible, .tools button:focus-visible, .modes button:focus-visible,
+summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.verdict { font-size: 14.5px; line-height: 1.5; display: grid; gap: 6px; }
+.verdict p { margin: 0; }
+.t-ok { color: var(--ok); font-weight: 700; }
+.t-bad { color: var(--bad); font-weight: 700; }
+.live { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--ink2); cursor: pointer; }
+.rules { font-size: 14px; color: var(--ink2); }
+.rules summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.rules ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+/* Mehrspieler */
+.mp-box { display: grid; gap: 10px; font-size: 14.5px; }
+.mp-box h3 { margin: 6px 0 0; font: 700 13px var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink2); }
+.mp-box p { margin: 0; }
+.mp-net { font-size: 13px; color: var(--ink2); }
+.mp-net.on::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; }
+.mp-warn { color: var(--bad); font-weight: 600; }
+.field { display: grid; gap: 4px; font-size: 13px; color: var(--ink2); }
+.field input, .field select { font: 500 16px var(--f-body); padding: 8px 10px; border: 2px solid var(--ink); background: var(--sheet);
+  color: var(--ink); border-radius: 2px; min-width: 0; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.board h2 { margin: 0; font: 800 clamp(26px, 3.4vw, 38px)/1 var(--f-display); letter-spacing: 0.03em; text-transform: uppercase; text-wrap: balance; }
+.board p { margin: 0; max-width: 70ch; }
+.steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; max-width: 64ch; }
+.bigcode { font: 800 clamp(72px, 14vw, 150px)/0.9 var(--f-display); letter-spacing: 0.14em; }
+.joinurl { font: 500 15px var(--f-mono); color: var(--accent); overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+.chips li { border: 1.5px solid var(--rule); padding: 4px 10px; font-weight: 600; }
+.chips li.done { border-color: var(--ok); color: var(--ok); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.card { position: relative; display: grid; gap: 4px; padding: 8px; border: 1.5px solid var(--rule); background: var(--sheet); min-width: 0; }
+.card canvas { width: 100%; cursor: default; touch-action: auto; }
+.card .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .vl { font: 500 13px var(--f-mono); color: var(--ink2); min-height: 1.3em; }
+.card .st { position: absolute; top: 12px; right: 10px; font: 800 17px/1 var(--f-display); letter-spacing: 0.06em;
+  border: 3px solid currentColor; padding: 3px 6px 1px; transform: rotate(-8deg); background: var(--sheet); }
+.card .st.ok { color: var(--ok); }
+.card .st.bad { color: var(--bad); }
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 24px; }
+.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
+.rank li { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+.rank .pl { color: var(--ink2); text-align: right; }
+.rank .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank .vl { font-family: var(--f-mono); }
+.rank li.me { font-weight: 700; }
+.rank li.ghost { color: var(--ink2); font-style: italic; }
+.rank li.out .vl { color: var(--bad); }
+.board .rank { font-size: clamp(15px, 1.7vw, 21px); }
+@media (prefers-reduced-motion: reduce) { .stamp.hit { animation: none; } }
+@media (max-width: 480px) { .sheet { padding: 10px 8px 8px; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1 class="brand">Knackpunkt</h1>
+    <p class="claim">Wie viel Material darf weg, bevor das Bauteil versagt?</p>
+    <div class="nav">
+      <nav class="modes" aria-label="Spielart">
+        <button type="button" id="m-solo" aria-pressed="true">Allein üben</button>
+        <button type="button" id="m-mp" aria-pressed="false">Mehrspieler</button>
+      </nav>
+      <nav class="levels" id="levels" aria-label="Bauteil wählen"></nav>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="sheet" aria-label="Zeichnung">
+      <div id="drawing">
+        <div class="sheet-head">
+          <p class="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
+            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln, etwa für schräge Streben. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            Kreuzschraffierte Kacheln sind gesperrt. Beim Abgeben rechnet die FEM: Hält das Bauteil, zählt jedes entfernte Gramm, versagt es, zählt nichts.</p>
+          <div class="tools" id="tools" role="group" aria-label="Werkzeug">
+            <button type="button" id="t-rect" aria-pressed="true">Rechteck</button>
+            <button type="button" id="t-brush" aria-pressed="false">Pinsel</button>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="wrap">
+          <canvas id="cv" aria-label="Bauteil aus Kacheln: Rechteck aufziehen oder antippen, um Material zu entfernen"></canvas>
+          <div class="stamp" id="stamp" hidden></div>
+          <div class="timer" id="timer" hidden></div>
+        </div>
+        <div class="legend" id="legend" hidden></div>
+        <p class="femline" id="femline"></p>
+      </div>
+      <div class="board" id="mp-board" hidden></div>
+    </section>
+
+    <aside class="side">
+      <table class="titleblock" aria-label="Schriftfeld">
+        <tbody>
+          <tr><th>Benennung</th><td id="tb-name"></td></tr>
+          <tr><th>Werkstoff</th><td>S235, Re = 235 MPa</td></tr>
+          <tr><th>Belastung</th><td id="tb-load"></td></tr>
+          <tr><th>Abmessungen</th><td id="tb-size"></td></tr>
+          <tr><th>Masse</th><td id="tb-mass"></td></tr>
+          <tr><th>Entfernt</th><td class="big" id="tb-removed"></td></tr>
+          <tr><th>Probe-Rechnung</th><td id="tb-probe"></td></tr>
+          <tr><th>Blatt</th><td id="tb-sheet"></td></tr>
+        </tbody>
+      </table>
+
+      <div id="solo-ui" class="side">
+        <div class="actions" id="act-design">
+          <button class="btn primary" id="b-submit" type="button">Abgeben und rechnen</button>
+          <button class="btn" id="b-probe" type="button">Probe-Rechnung</button>
+          <button class="btn" id="b-undo" type="button">Rückgängig</button>
+          <button class="btn" id="b-reset" type="button">Alles zurück</button>
+        </div>
+        <div class="actions" id="act-result" hidden>
+          <button class="btn primary" id="b-retry" type="button">Neuer Versuch</button>
+          <button class="btn" id="b-eso" type="button">Lösung des Algorithmus</button>
+          <button class="btn" id="b-next" type="button">Nächstes Bauteil</button>
+        </div>
+
+        <div class="verdict" id="verdict" aria-live="polite"></div>
+
+        <label class="live"><input type="checkbox" id="live"> Spannungen live zeigen (Übungsmodus)</label>
+
+        <details class="rules">
+          <summary>So wird gerechnet</summary>
+          <ul>
+            <li>Ebener Spannungszustand, Stahl S235: E = 210 GPa, ν = 0,3, Dicke 10 mm.</li>
+            <li>Jede Kachel (10 × 10 mm) besteht aus 4 × 4 Viereckelementen mit inkompatiblen Moden. Die Steifigkeitsmatrix wird bei jeder Rechnung neu aufgebaut und gelöst.</li>
+            <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
+            <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
+            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält.</li>
+            <li>Nicht berechnet: Knicken und Eigengewicht.</li>
+          </ul>
+        </details>
+      </div>
+
+      <div id="mp-ui" class="mp-box" aria-live="polite" hidden></div>
+    </aside>
+  </main>
+</div>
+
+<script>
+<!--FEM-->
+</script>
+<script>
+<!--GAME-->
+</script>
