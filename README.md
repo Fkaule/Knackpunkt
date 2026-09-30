@@ -22,8 +22,8 @@ flowchart TD
 
 ### 1. Modell
 
-- Das Bauteil ist eine ebene Scheibe der Dicke $`t = 10\,\mathrm{mm}`$ aus Stahl S235: $`E = 210\,000\,\mathrm{MPa}`$, $`\nu = 0{,}3`$, $`R_e = 235\,\mathrm{MPa}`$.
-- Es besteht aus Kacheln von $`10 \times 10\,\mathrm{mm}`$. Jede Kachel ist mit $`4 \times 4`$ quadratischen Elementen der Kantenlänge $`h = 2{,}5\,\mathrm{mm}`$ vernetzt. Das Netz ist fest: Jeder Entwurf wird auf demselben Raster gerechnet.
+- Das Bauteil ist eine ebene Scheibe der Dicke $`t = 10\,\mathrm{mm}`$ aus Stahl S235: $`E = 210\,000\,\mathrm{MPa}`$, $`\nu = \text{0,3}`$, $`R_e = 235\,\mathrm{MPa}`$.
+- Es besteht aus Kacheln von $`10 \times 10\,\mathrm{mm}`$. Jede Kachel ist mit $`4 \times 4`$ quadratischen Elementen der Kantenlänge $`h = \text{2,5}\,\mathrm{mm}`$ vernetzt. Das Netz ist fest: Jeder Entwurf wird auf demselben Raster gerechnet.
 - Eine entfernte Kachel fehlt im Modell ganz. Es gibt keine weiche Ersatzsteifigkeit wie bei der Topologieoptimierung.
 - Annahmen: linear elastisch, kleine Verformungen, statisch, ebener Spannungszustand. Nicht berücksichtigt: Eigengewicht, Knicken und Beulen, Plastizität.
 
@@ -122,7 +122,7 @@ A_k = \frac{1}{16\,R_e}\sum_{e \in k} \sigma_{v,e}
 
 Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager hat und keine Starrkörperbewegung möglich ist.
 
-**Warum gemittelt wird.** Jede entfernte Kachel erzeugt einspringende 90°-Ecken. In der linearen Elastizitätstheorie ist die Spannung dort singulär ($`\sigma \sim r^{-0{,}46}`$), der Spitzenwert hängt also nur vom Netz ab. Der Mittelwert über eine Kachel ist dagegen eine stabile Größe und entspricht grob einer Spannungsmittelung nach Neuber. Für duktilen Stahl ist das vertretbar: Örtliche Spitzen dürfen fließen, entscheidend ist, ob der Querschnitt trägt.
+**Warum gemittelt wird.** Jede entfernte Kachel erzeugt einspringende 90°-Ecken. In der linearen Elastizitätstheorie ist die Spannung dort singulär ($`\sigma \sim r^{-\text{0,46}}`$), der Spitzenwert hängt also nur vom Netz ab. Der Mittelwert über eine Kachel ist dagegen eine stabile Größe und entspricht grob einer Spannungsmittelung nach Neuber. Für duktilen Stahl ist das vertretbar: Örtliche Spitzen dürfen fließen, entscheidend ist, ob der Querschnitt trägt.
 
 **Was das für die Prüfung heißt.** Die Kachelmittelung ist eine Spielregel, kein Normnachweis:
 
@@ -136,7 +136,7 @@ Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager 
 \text{entfernt} = 1 - \frac{\text{Kacheln mit Verbindung zu einem Lager}}{\text{Kacheln des Vollteils}}
 ```
 
-Die Punkte sind die entfernten Prozent, bei Versagen 0. Masse je Kachel: $`1\,\mathrm{cm^3} \cdot 7{,}85\,\mathrm{g/cm^3} = 7{,}85\,\mathrm g`$.
+Die Punkte sind die entfernten Prozent, bei Versagen 0. Masse je Kachel: $`1\,\mathrm{cm^3} \cdot \text{7,85}\,\mathrm{g/cm^3} = \text{7,85}\,\mathrm g`$.
 
 ### 7. Gegner: Evolutionäre Strukturoptimierung (ESO)
 
