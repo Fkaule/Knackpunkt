@@ -610,7 +610,10 @@
   // Spielleitung: k, h = 1, n, j, g {rid, ph, lv, dur, left}, res [[peer, Name, Prozent mal 10, hält]], sc [[Name, Punkte mal 10]]
   function serverRoom() {
     if (!/^https?:$/.test(location.protocol) || !window.WebSocket) return null;
-    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    // relativ zur Seite, damit das Spiel auch unter einem Unterpfad läuft (etwa /knackpunkt/ hinter nginx)
+    const u = new URL('ws', location.href);
+    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = u.href;
     const mine = {}, others = new Map(), peerH = [], connH = [];
     let ws = null, me = null, up = false, delay = 1000, sendTimer = null, pending = false;
     const snap = () => {
@@ -666,8 +669,8 @@
     try { R = window.claude && window.claude.use ? await window.claude.use('room') : null; } catch { R = null; }
     if (R) net.mode = 'claude';
     else if (!window.claude) {
-      // Nur der Knackpunkt-Server kennt /api/status; auf statischem Hosting (GitHub Pages) gibt es keinen Wettkampf
-      const ok = await fetch('/api/status', { cache: 'no-store' })
+      // Nur der Knackpunkt-Server kennt api/status; auf statischem Hosting (GitHub Pages) gibt es keinen Wettkampf
+      const ok = await fetch('api/status', { cache: 'no-store' })
         .then(r => r.ok && /json/.test(r.headers.get('content-type') || '')).catch(() => false);
       if (ok) { R = serverRoom(); if (R) net.mode = 'server'; }
     }

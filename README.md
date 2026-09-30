@@ -22,6 +22,16 @@ npm start       # Server auf PORT (Standard 8080)
 
 Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 
+## Deploy mit Docker
+
+```
+KNACKPUNKT_HOST=<ssh-name des Servers> scripts/deploy.sh
+```
+
+Baut `game.html`, kopiert die nötigen Dateien nach `~/knackpunkt` auf dem Server, baut dort das Image und startet den Container `knackpunkt` neu (`--restart unless-stopped`, nur lokal auf `127.0.0.1:8907`). Bricht ab, wenn gerade eine Runde läuft (`--force` erzwingt den Neustart).
+
+Nach außen geht es über nginx: `deploy/nginx-knackpunkt-location.conf` in den `server`-Block mit TLS einbinden, dann ist das Spiel unter `/knackpunkt/` erreichbar. Die Seite nutzt relative Pfade und läuft deshalb auch unter einem Unterpfad.
+
 ## Wettkampf
 
 - Spielleitung: „Mehrspieler“, „Neues Spiel eröffnen“, Bauteil und Zeit wählen, Runde starten
