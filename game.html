@@ -75,7 +75,7 @@ canvas.locked { cursor: default; }
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .btn { font: 600 14px var(--f-body); padding: 10px 12px; border: 2px solid var(--ink); background: var(--sheet); color: var(--ink);
   border-radius: 2px; cursor: pointer; }
-#b-probe { grid-column: 1 / -1; }
+#b-probe, #mp-probe-btn { grid-column: 1 / -1; }
 .btn.primary { grid-column: 1 / -1; background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-size: 16px; padding: 12px; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn:focus-visible, .levels button:focus-visible, .tools button:focus-visible, .modes button:focus-visible,
@@ -911,7 +911,8 @@ if (typeof module !== 'undefined') module.exports = FEM;
     $('tb-size').textContent = `${d.tx * TILE} × ${d.ty * TILE} × ${THICK} mm`;
     $('tb-mass').textContent = `${fmt(kept * TILE_G)} von ${fmt(total * TILE_G)} g`;
     $('tb-removed').textContent = `${fmt(100 * (1 - kept / total), 1)} %`;
-    $('tb-probe').textContent = mp.on ? 'im Wettkampf keine' : st.probes ? `${st.probes} übrig` : 'verbraucht';
+    $('tb-probe').textContent = mp.role === 'host' ? `${mp.g.pr} je Person`
+      : st.probes ? `${st.probes} übrig` : mp.on ? 'keine übrig' : 'verbraucht';
     const rid = mp.role === 'host' ? mp.g.rid : mp.rid;
     $('tb-sheet').textContent = mp.on ? (rid ? `Runde ${rid}` : 'Warteraum') : `${st.li + 1} von ${LEVELS.length}`;
   }
@@ -949,7 +950,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
       $('femline').textContent = '';
       $('verdict').innerHTML = `<p>${st.def.note}</p>${hint}`;
     }
-    panel(); controls(); render();
+    panel(); controls(); render(); mpRender();
   }
 
   function loadLevel(i) {
@@ -982,8 +983,9 @@ if (typeof module !== 'undefined') module.exports = FEM;
     st.phase = 'probe';
     st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
     showFem(r, 0);
-    $('verdict').innerHTML = `<p>Probe-Rechnung: ${statusText(r)} Die Farben verschwinden, sobald Sie weiterarbeiten.</p>`;
-    panel(); controls(); render();
+    st.probeText = `Probe-Rechnung: ${statusText(r)} Die Farben verschwinden, sobald Sie weiterarbeiten.`;
+    $('verdict').innerHTML = `<p>${st.probeText}</p>`;
+    panel(); controls(); render(); mpRender();
   }
 
   function play(dur, frame, done) {
@@ -1225,7 +1227,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
   const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   const mp = { on: false, role: null, code: '', name: '', j: 0, rid: 0, sub: false, revealed: 0, own: null,
-    g: { rid: 0, ph: 'lobby', lv: 0, dur: 90, left: 0 }, tick: null, deadline: 0, revealTimer: null,
+    g: { rid: 0, ph: 'lobby', lv: 0, dur: 90, left: 0, pr: 2 }, pr: 0, tick: null, deadline: 0, revealTimer: null,
     snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false };
   let mpScr = '';
 
@@ -1245,7 +1247,8 @@ if (typeof module !== 'undefined') module.exports = FEM;
   function validG(g) {
     if (!g || typeof g !== 'object' || !Number.isInteger(g.rid) || g.rid < 0) return null;
     if (!['lobby', 'design', 'reveal'].includes(g.ph) || !Number.isInteger(g.lv) || !LEVELS[g.lv]) return null;
-    return { rid: g.rid, ph: g.ph, lv: g.lv, dur: Number(g.dur) || 90, left: Math.max(0, Math.min(999, Math.round(Number(g.left) || 0))) };
+    return { rid: g.rid, ph: g.ph, lv: g.lv, dur: Number(g.dur) || 90, left: Math.max(0, Math.min(999, Math.round(Number(g.left) || 0))),
+      pr: Math.max(0, Math.min(9, Math.round(Number(g.pr) || 0))) };
   }
   const hostG = () => { const h = hostPeer(); return h ? validG(h.presence.g) : null; };
   const validRes = res => (Array.isArray(res) ? res : [])
@@ -1264,16 +1267,19 @@ if (typeof module !== 'undefined') module.exports = FEM;
     mpSync();
   }
   function startPlayerRound(g) {
-    Object.assign(mp, { rid: g.rid, sub: false, own: null });
+    Object.assign(mp, { rid: g.rid, sub: false, own: null, pr: g.pr });
     loadLevel(g.lv);
-    st.probes = 0;
+    st.probes = g.pr;
+    st.probeText = '';
     pres({ r: g.rid, s: 0, d: null });
     panel();
   }
   function playerSubmit() {
-    if (mp.role !== 'player' || mp.sub || st.phase !== 'design') return;
+    if (mp.role !== 'player' || mp.sub || !editable()) return;
     mp.sub = true;
-    Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1 });
+    // auch direkt nach einer Probe-Rechnung: gesperrt wird der Entwurf wieder ohne Spannungen gezeigt
+    Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1, view: { mode: 'blind' } });
+    $('legend').hidden = true; $('femline').textContent = '';
     pres({ r: mp.rid, s: 1, d: encode(st.solid) });
     controls(); render(); mpRender();
   }
@@ -1292,7 +1298,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
 
   // ---------- Wettkampf: Spielleitung ----------
   const scoreList = () => Object.values(mp.scores).sort((a, b) => b.pts - a.pts).slice(0, 10).map(s => [s.name, Math.round(s.pts * 10)]);
-  const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, dur: mp.g.dur, scores: mp.scores, t: Date.now() });
+  const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, dur: mp.g.dur, pr: mp.g.pr, scores: mp.scores, t: Date.now() });
   function savedHost() {
     const h = store.get('host');
     return h && typeof h.code === 'string' && Date.now() - h.t < 6 * 3600e3 ? h : null;
@@ -1301,15 +1307,16 @@ if (typeof module !== 'undefined') module.exports = FEM;
     const r = resume ? savedHost() : null;
     Object.assign(mp, { role: 'host', code: r ? normCode(r.code) : newCode(), j: Date.now(), snap: null, order: null,
       scores: r && r.scores && typeof r.scores === 'object' ? r.scores : {},
-      g: { rid: r ? r.rid | 0 : 0, ph: 'lobby', lv: r && LEVELS[r.lv] ? r.lv : 0, dur: r ? r.dur || 90 : 90, left: 0 } });
+      g: { rid: r ? r.rid | 0 : 0, ph: 'lobby', lv: r && LEVELS[r.lv] ? r.lv : 0, dur: r ? r.dur || 90 : 90, left: 0,
+        pr: r && Number.isInteger(r.pr) ? r.pr : 2 } });
     loadLevel(mp.g.lv);
     st.phase = 'locked';
     pres({ k: mp.code, h: 1, n: 'Spielleitung', j: mp.j, g: { ...mp.g }, sc: scoreList() });
     saveHost(); mpSync();
   }
   function hostStart() {
-    const lv = +$('mp-lv').value, dur = +$('mp-dur').value;
-    Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, dur, left: dur });
+    const lv = +$('mp-lv').value, dur = +$('mp-dur').value, pr = +$('mp-pr').value;
+    Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, dur, left: dur, pr });
     Object.assign(mp, { deadline: performance.now() + dur * 1000, snap: null, order: null });
     stopBoard();
     loadLevel(lv);
@@ -1491,12 +1498,15 @@ if (typeof module !== 'undefined') module.exports = FEM;
       <button class="btn" type="button" data-act="leave">Raum verlassen</button>`,
     'p-design': () => `<p class="mp-net" id="mp-net"></p>
       <p><b>Runde ${mp.rid}: ${lvName(st.li)}.</b> Entfernen Sie Material, bis die Zeit abläuft. Wer zu viel wegnimmt, bricht.
-        Wer zu wenig wegnimmt, verliert gegen die anderen.</p>
+        Wer zu wenig wegnimmt, verliert gegen die anderen.${mp.pr ? ` Mit ${mp.pr === 1 ? 'einer Probe-Rechnung' : `${mp.pr} Probe-Rechnungen`}
+        sehen Sie die Spannungen Ihres aktuellen Entwurfs.` : ''}</p>
       <div class="actions">
         <button class="btn primary" type="button" data-act="submit">Abgeben</button>
+        <button class="btn" type="button" data-act="probe" id="mp-probe-btn"${mp.pr ? '' : ' hidden'}>Probe-Rechnung</button>
         <button class="btn" type="button" data-act="undo">Rückgängig</button>
         <button class="btn" type="button" data-act="reset">Alles zurück</button>
       </div>
+      <p id="mp-probe"></p>
       <p id="mp-msg"></p>`,
     'p-locked': () => `<p class="mp-net" id="mp-net"></p>
       <p><b>Abgegeben.</b> Die Auflösung startet, sobald alle fertig sind oder die Zeit abläuft.</p>
@@ -1512,11 +1522,12 @@ if (typeof module !== 'undefined') module.exports = FEM;
         <label class="field">Bauteil<select id="mp-lv">${LEVELS.map((d, i) => `<option value="${i}">${i + 1} ${esc(d.name)}</option>`).join('')}</select></label>
         <label class="field">Zeit<select id="mp-dur">${[60, 90, 120, 180].map(s => `<option value="${s}">${mmss(s)} min</option>`).join('')}</select></label>
       </div>
+      <label class="field">Probe-Rechnungen je Person<select id="mp-pr">${[0, 1, 2, 3, 5].map(n => `<option value="${n}">${n ? n : 'keine, nur blind'}</option>`).join('')}</select></label>
       <button class="btn primary" type="button" data-act="start">Runde ${mp.g.rid + 1} starten</button>
       <h3>Gesamtwertung</h3><div id="mp-score"></div>
       <button class="btn" type="button" data-act="end">Spiel beenden</button>`,
     'h-design': () => `<p class="mp-net" id="mp-net"></p>
-      <p><b>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</b> läuft.</p>
+      <p><b>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</b> läuft, ${mp.g.pr ? `je Person ${mp.g.pr === 1 ? 'eine Probe-Rechnung' : `${mp.g.pr} Probe-Rechnungen`}` : 'ohne Probe-Rechnung'}.</p>
       <p id="mp-msg"></p>
       <ul class="chips" id="mp-chips"></ul>
       <button class="btn primary" type="button" data-act="now">Jetzt auflösen</button>`,
@@ -1567,6 +1578,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
       if (scr === 'h-lobby') {
         $('mp-lv').value = String(mp.g.rid ? (mp.g.lv + 1) % LEVELS.length : mp.g.lv);
         $('mp-dur').value = String(mp.g.dur);
+        $('mp-pr').value = String(mp.g.pr);
       }
       if (scr === 'h-reveal') showCards(true);
       if (show) requestAnimationFrame(() => { if (wrap.clientWidth) { layout(); render(); } });
@@ -1601,6 +1613,12 @@ if (typeof module !== 'undefined') module.exports = FEM;
       set('mp-chips', `<li class="done">${esc(mp.name)} (Sie)</li>` + chips(false));
     }
     if (scr === 'p-design' || scr === 'p-locked') set('mp-msg', `${ps.filter(done).length + (mp.sub ? 1 : 0)} von ${ps.length + 1} haben abgegeben.`);
+    if (scr === 'p-design') {
+      const b = $('mp-probe-btn');
+      b.textContent = `Probe-Rechnung (${st.probes})`;
+      b.disabled = !st.probes || !editable();
+      set('mp-probe', st.phase === 'probe' && st.probeText ? esc(st.probeText) : '');
+    }
     if (scr === 'p-result') {
       const h = hostPeer(), g = hostG(), res = h && g && g.rid === mp.rid ? validRes(h.presence.res) : [];
       const me = myPeer(), i = res.findIndex(e => e.peer === me), r = mp.own;
@@ -1645,7 +1663,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
     loadLevel(st.li);
   }
 
-  const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, undo, reset: resetAll,
+  const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
     leave: () => leaveRoom(false), end: () => leaveRoom(true), start: hostStart, now: hostEndNow, next: hostNext };
   for (const id of ['mp-ui', 'mp-board']) $(id).addEventListener('click', e => {
     const b = e.target.closest('[data-act]');

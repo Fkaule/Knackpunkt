@@ -8,16 +8,30 @@ Allein üben: https://fkaule.github.io/Knackpunkt/
 
 Kurzfassung: lineare Elastostatik einer dünnen Stahlscheibe im ebenen Spannungszustand, gelöst mit der Finite-Elemente-Methode. Der Nachweis vergleicht die über jede Kachel gemittelte Vergleichsspannung nach von Mises mit der Streckgrenze. Alles steht in `src/fem.js` (ohne Bibliotheken) und wird bei jedem Aufdecken vollständig neu gerechnet.
 
-```mermaid
-flowchart TD
-  A["Entwurf: welche Kacheln stehen noch?"] --> B["Zusammenhang: was hängt am Lager, was trägt die Last?"]
-  B --> C["Steifigkeitsmatrix K aus lauter gleichen Elementmatrizen"]
-  C --> D["Lager einsetzen, K u = f lösen"]
-  D --> E["Spannungen im Mittelpunkt jedes Elements"]
-  E --> F["Vergleichsspannung, Mittelwert je Kachel, geteilt durch Re"]
-  F --> G{"Alle Kacheln höchstens 100 %?"}
-  G -->|ja| H["hält: Punkte = entfernte Prozent"]
-  G -->|nein| I["Bruch: 0 Punkte"]
+```
+Entwurf: welche Kacheln stehen noch?
+    |
+    v
+Zusammenhang: was hängt am Lager, was trägt die Last?
+    |
+    v
+Steifigkeitsmatrix K aus lauter gleichen Elementmatrizen
+    |
+    v
+Lager einsetzen, K u = f lösen (Band-Cholesky)
+    |
+    v
+Spannungen im Mittelpunkt jedes Elements
+    |
+    v
+Vergleichsspannung, Mittelwert je Kachel, geteilt durch Re
+    |
+    v
+Alle Kacheln höchstens 100 %?
+    |
+    +-- ja:   hält, Punkte = entfernte Prozent
+    |
+    +-- nein: Bruch, 0 Punkte
 ```
 
 ### 1. Modell
@@ -214,6 +228,7 @@ Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 
 - Spielleitung: „Mehrspieler“, „Neues Spiel eröffnen“, Bauteil und Zeit wählen, Runde starten
 - Mitspielende: Link mit `#RAUMCODE` öffnen oder Code eintippen, Pseudonym eintragen
+- Probe-Rechnungen: Die Spielleitung legt je Runde fest, wie viele (0 bis 5). Eine Probe zeigt die Spannungen des aktuellen Entwurfs, bis man weiterarbeitet
 - Ende der Zeit gibt automatisch ab; die FEM rechnet alle Entwürfe bei der Spielleitung, Punkte = entfernte Prozent, wenn es hält, sonst 0
 
 ## Deploy mit Docker
