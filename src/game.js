@@ -665,7 +665,12 @@
     let R = null;
     try { R = window.claude && window.claude.use ? await window.claude.use('room') : null; } catch { R = null; }
     if (R) net.mode = 'claude';
-    else if (!window.claude) { R = serverRoom(); if (R) net.mode = 'server'; }
+    else if (!window.claude) {
+      // Nur der Knackpunkt-Server kennt /api/status; auf statischem Hosting (GitHub Pages) gibt es keinen Wettkampf
+      const ok = await fetch('/api/status', { cache: 'no-store' })
+        .then(r => r.ok && /json/.test(r.headers.get('content-type') || '')).catch(() => false);
+      if (ok) { R = serverRoom(); if (R) net.mode = 'server'; }
+    }
     if (!R) { net.mode = 'none'; mpRender(); return; }
     if (net.mode === 'claude') {
       try {
@@ -935,7 +940,7 @@
   function netText() {
     if (net.mode === 'none') return window.claude
       ? 'Keine Live-Verbindung in dieser Ansicht. Mitspielen können angemeldete Personen, mit denen das Artifact geteilt ist.'
-      : 'Keine Live-Verbindung. Für den Wettkampf die Seite über den Knackpunkt-Server öffnen.';
+      : 'Auf dieser Seite läuft kein Spielserver, der Wettkampf geht hier nicht. „Allein üben“ funktioniert.';
     if (net.err) return `Live-Verbindung gestört (${net.err}).`;
     return net.up ? 'Live verbunden' : 'Verbinde …';
   }
@@ -1077,6 +1082,7 @@
       const r = savedHost(), b = $('mp-resume');
       b.hidden = !r;
       if (r) b.textContent = `Spiel ${r.code} fortsetzen (nach Runde ${r.rid})`;
+      for (const x of document.querySelectorAll('#mp-ui [data-act]')) x.disabled = net.mode === 'none';
     }
     if (scr === 'p-wait') {
       const g = hostG();
