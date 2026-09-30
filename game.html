@@ -107,6 +107,9 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .chips li { border: 1.5px solid var(--rule); padding: 4px 10px; font-weight: 600; }
 .chips li.done { border-color: var(--ok); color: var(--ok); }
+.chips .pd { display: inline-block; width: 9px; height: 9px; margin-left: 5px; border: 1.5px solid currentColor; border-radius: 50%; vertical-align: 0; }
+.chips .pd.on { background: currentColor; }
+.mp-note { font-size: 13px; color: var(--ink2); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .card { position: relative; display: grid; gap: 4px; padding: 8px; border: 1.5px solid var(--rule); background: var(--sheet); min-width: 0; }
 .card canvas { width: 100%; cursor: default; touch-action: auto; }
@@ -984,6 +987,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
     st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
     showFem(r, 0);
     st.probeText = `Probe-Rechnung: ${statusText(r)} Die Farben verschwinden, sobald Sie weiterarbeiten.`;
+    if (mp.role === 'player') pres({ pu: mp.pr - st.probes });   // verbrauchte Proben für den Beamer
     $('verdict').innerHTML = `<p>${st.probeText}</p>`;
     panel(); controls(); render(); mpRender();
   }
@@ -1256,6 +1260,8 @@ if (typeof module !== 'undefined') module.exports = FEM;
     .map(e => ({ peer: e[0], name: clean(e[1], 16) || 'Jemand', rem: Math.max(0, Math.min(1000, e[2])) / 10, ok: e[3] === 1 }));
   const validSc = sc => (Array.isArray(sc) ? sc : []).filter(e => Array.isArray(e) && Number.isFinite(e[1])).slice(0, 20)
     .map(e => ({ name: clean(e[0], 16) || 'Jemand', pts: e[1] / 10 }));
+  // gemeldete verbrauchte Proben einer Person, begrenzt auf die Einstellung der Runde
+  const probesUsed = q => Math.max(0, Math.min(mp.g.pr, Math.round(Number(q.pu) || 0)));
 
   // ---------- Wettkampf: Mitspielende ----------
   function joinRoom() {
@@ -1271,7 +1277,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
     loadLevel(g.lv);
     st.probes = g.pr;
     st.probeText = '';
-    pres({ r: g.rid, s: 0, d: null });
+    pres({ r: g.rid, s: 0, d: null, pu: 0 });
     panel();
   }
   function playerSubmit() {
@@ -1350,7 +1356,8 @@ if (typeof module !== 'undefined') module.exports = FEM;
       const q = p.presence, solid = q.r === mp.g.rid && q.s === 1 ? decode(q.d, L) : null;
       if (!solid) continue;
       const res = FEM.analyze(L, solid);
-      list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, res.conn) * 10) / 10 });
+      list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, res.conn) * 10) / 10,
+        pu: probesUsed(q) });
     }
     for (const e of list) {
       const key = e.name.toLowerCase(), s = mp.scores[key] || (mp.scores[key] = { name: e.name, pts: 0 });
@@ -1404,7 +1411,8 @@ if (typeof module !== 'undefined') module.exports = FEM;
       if (!redraw && card.dataset.open === String(open)) continue;
       card.dataset.open = String(open);
       drawMini(card.querySelector('canvas'), st.L, e.solid, open ? e.res : null);
-      card.querySelector('.vl').textContent = open ? `${fmt(e.rem, 1)} % entfernt` : '';
+      card.querySelector('.vl').textContent = !open ? ''
+        : `${fmt(e.rem, 1)} % entfernt` + (mp.g.pr ? `, ${e.pu === 1 ? '1 Probe' : `${e.pu} Proben`}` : '');
       if (open && !card.querySelector('.st')) {
         const s = document.createElement('div');
         s.className = 'st ' + (e.ok ? 'ok' : 'bad');
@@ -1530,6 +1538,7 @@ if (typeof module !== 'undefined') module.exports = FEM;
       <p><b>Runde ${mp.g.rid}: ${lvName(mp.g.lv)}</b> läuft, ${mp.g.pr ? `je Person ${mp.g.pr === 1 ? 'eine Probe-Rechnung' : `${mp.g.pr} Probe-Rechnungen`}` : 'ohne Probe-Rechnung'}.</p>
       <p id="mp-msg"></p>
       <ul class="chips" id="mp-chips"></ul>
+      ${mp.g.pr ? '<p class="mp-note">Punkte hinter den Namen: gefüllt heißt Probe verbraucht. Grün heißt abgegeben.</p>' : ''}
       <button class="btn primary" type="button" data-act="now">Jetzt auflösen</button>`,
     'h-reveal': () => `<p class="mp-net" id="mp-net"></p>
       <p><b>Auflösung Runde ${mp.g.rid}.</b> Die Entwürfe werden nacheinander aufgedeckt, der gewagteste zuletzt.</p>
@@ -1592,7 +1601,9 @@ if (typeof module !== 'undefined') module.exports = FEM;
     if (netEl) { netEl.textContent = netText(); netEl.classList.toggle('on', net.up && !net.err); }
     const ps = players(), rid = mp.role === 'host' ? mp.g.rid : mp.rid;
     const done = p => p.presence.r === rid && p.presence.s === 1;
-    const chips = mark => ps.map(p => `<li class="${mark && done(p) ? 'done' : ''}">${esc(clean(p.presence.n, 16) || 'Jemand')}</li>`).join('');
+    // auf dem Beamer während der Runde: je Probe-Rechnung ein Punkt, gefüllt wenn verbraucht
+    const dots = p => Array.from({ length: mp.g.pr }, (_, i) => `<i class="pd${i < (p.presence.r === rid ? probesUsed(p.presence) : 0) ? ' on' : ''}"></i>`).join('');
+    const chips = mark => ps.map(p => `<li class="${mark && done(p) ? 'done' : ''}">${esc(clean(p.presence.n, 16) || 'Jemand')}${mark ? dots(p) : ''}</li>`).join('');
     let left = null;
     if (scr === 'h-design') left = mp.g.left;
     if (scr === 'p-design' || scr === 'p-locked') { const g = hostG(); left = g ? g.left : null; }

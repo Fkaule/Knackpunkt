@@ -107,6 +107,9 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .chips li { border: 1.5px solid var(--rule); padding: 4px 10px; font-weight: 600; }
 .chips li.done { border-color: var(--ok); color: var(--ok); }
+.chips .pd { display: inline-block; width: 9px; height: 9px; margin-left: 5px; border: 1.5px solid currentColor; border-radius: 50%; vertical-align: 0; }
+.chips .pd.on { background: currentColor; }
+.mp-note { font-size: 13px; color: var(--ink2); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .card { position: relative; display: grid; gap: 4px; padding: 8px; border: 1.5px solid var(--rule); background: var(--sheet); min-width: 0; }
 .card canvas { width: 100%; cursor: default; touch-action: auto; }
