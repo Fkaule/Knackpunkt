@@ -8,7 +8,7 @@ FEM-Minispiel: Aus einem Bauteil Kacheln entfernen, dann rechnet eine echte FE-R
 - `src/game.js`: Spiel, Zeichnung, Wettkampf (Presence über claude.ai-Raum oder eigenen Server)
 - `src/shell.html`: Seite und Stil
 - `game.html`: gebaute Spieldatei (Seitenfragment), läuft als claude.ai-Artifact und über `server.mjs`
-- `docs/index.html`: dieselbe Seite als vollständiges Dokument für GitHub Pages (https://fkaule.github.io/Knackpunkt/); dort gibt es nur „Allein üben“, der Wettkampf braucht den Server
+- `index.html`: dieselbe Seite als vollständiges Dokument für GitHub Pages (https://fkaule.github.io/Knackpunkt/, Quelle `main`, Hauptverzeichnis, `.nojekyll`); dort gibt es nur „Allein üben“, der Wettkampf braucht den Server
 - `server.mjs`: liefert das Spiel aus und verteilt den Status aller Geräte per WebSocket (`/ws`), Status unter `/api/status`
 
 ## Befehle
