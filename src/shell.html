@@ -38,6 +38,8 @@ body { background: var(--paper); color: var(--ink); font: 15px/1.45 var(--f-body
 .levels button[aria-pressed="true"], .tools button[aria-pressed="true"], .modes button[aria-pressed="true"] {
   border-color: var(--ink); background: var(--ink); color: var(--sheet); }
 .tools button:disabled { opacity: 0.4; cursor: not-allowed; }
+.lopts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 10px; border-left: 1.5px solid var(--rule); }
+.lopts span { font: 600 13px var(--f-body); color: var(--ink2); margin-left: 4px; }
 .stage { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
 @media (max-width: 880px) { .stage { grid-template-columns: minmax(0, 1fr); } }
 .sheet { background: var(--sheet); border: 2px solid var(--ink); outline: 1px solid var(--ink); outline-offset: 4px;
@@ -159,17 +161,30 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
       <div id="drawing">
         <div class="sheet-head">
           <p class="howto" id="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
-            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln, etwa für schräge Streben. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            <b>Ecke</b> schneidet per Klick eine Ecke schräg ab, ein Klick auf ein Dreieck nimmt es weg, einer in die freie Ecke macht die Kachel wieder voll.
+            <b>Linie</b> zieht ein Band waagrecht, senkrecht oder unter 45° und entfernt oder fügt hinzu, wie gewählt, in Dicke 1 bis 3.
+            Tasten R, P, E und L wechseln das Werkzeug, Plus und Minus sowie 1 bis 3 stellen die Linie ein.
             Kreuzschraffierte Kacheln sind gesperrt. Beim Abgeben rechnet die FEM: Hält das Bauteil, zählt jedes entfernte Gramm, versagt es, zählt nichts.</p>
           <p class="howto" id="howto-open" hidden><b>Offene Karten:</b> Nach jeder Wegnahme rechnet die FEM und zeigt die Spannungen.
-            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln.
+            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln, <b>Ecke</b> schneidet eine Ecke schräg ab, <b>Linie</b> schneidet ein gerades oder schräges Band heraus.
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
             <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
             <b>Last</b> per Klick auf eine Außenkante setzen, jeder weitere Klick dreht sie um 45°. Wie groß die Last ist, rechnet das Spiel aus. Beim Spielen steht das Bauteil im Link der Seite.</p>
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
-            <button type="button" id="t-rect" aria-pressed="true">Rechteck</button>
-            <button type="button" id="t-brush" aria-pressed="false">Pinsel</button>
+            <button type="button" id="t-rect" aria-pressed="true" title="Taste R">Rechteck</button>
+            <button type="button" id="t-brush" aria-pressed="false" title="Taste P">Pinsel</button>
+            <button type="button" id="t-corner" aria-pressed="false" title="Taste E: Klick schneidet eine Ecke schräg ab">Ecke</button>
+            <button type="button" id="t-line" aria-pressed="false" title="Taste L: Band waagrecht, senkrecht oder unter 45° ziehen">Linie</button>
+            <span class="lopts" id="lopts" role="group" aria-label="Linie" hidden>
+              <button type="button" id="l-cut" aria-pressed="true" title="Taste Minus">Entfernen</button>
+              <button type="button" id="l-add" aria-pressed="false" title="Taste Plus">Hinzufügen</button>
+              <span>Dicke</span>
+              <button type="button" data-w="1" aria-pressed="true" title="Taste 1: gerade 10 mm, schräg 7 mm">1</button>
+              <button type="button" data-w="2" aria-pressed="false" title="Taste 2: gerade 20 mm, schräg 14 mm">2</button>
+              <button type="button" data-w="3" aria-pressed="false" title="Taste 3: gerade 30 mm, schräg 21 mm">3</button>
+            </span>
           </div>
           <div class="tools" id="etools" role="group" aria-label="Baukasten" hidden>
             <button type="button" data-t="form" aria-pressed="true">Material</button>
@@ -242,9 +257,10 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <ul>
             <li>Ebener Spannungszustand, Stahl S235: E = 210 GPa, ν = 0,3, Dicke 10 mm.</li>
             <li>Jede Kachel (10 × 10 mm) besteht aus 4 × 4 Viereckelementen mit inkompatiblen Moden. Die Steifigkeitsmatrix wird bei jeder Rechnung neu aufgebaut und gelöst.</li>
+            <li>Halbe Kacheln (abgeschnittene Ecke) bekommen entlang der Schnittkante lineare Dreieckselemente. Bei Masse und Wertung zählen sie halb.</li>
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
-            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält.</li>
+            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
         </details>
@@ -254,6 +270,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Gewertet wird der Mittelwert der Vergleichsspannung über eine Kachel, nicht die Spitze. An scharfen Innenecken wächst die Spitze in einer echten FE-Rechnung mit jeder Netzverfeinerung weiter (Singularität). Beispiel L-Winkel, Innenecke: Spitze im Eckelement 191, 261, 355 und 482 MPa bei 2, 4, 8 und 16 Elementen je Kachelkante, das Kachelmittel bleibt bei 135 MPa.</li>
             <li>Das Netz ist fest, 4 × 4 Elemente je Kachel. Eine Konvergenzstudie macht das Spiel nicht.</li>
             <li>Alle Ecken sind scharf. Echte Bauteile bekommen dort Radien, sonst entscheidet die Kerbe.</li>
+            <li>Lineare Dreiecke an schrägen Kanten sind steifer als die Vierecke, dort rechnet das Spiel etwas zu steif. Eine halbe Kachel mittelt über die halbe Fläche und ist damit etwas strenger.</li>
             <li>„Bruch“ heißt hier: Eine Kachel fließt im Mittel. Das ist kein Bruch im Sinne der Festigkeitslehre und kein Nachweis nach Norm.</li>
             <li>Knicken, Eigengewicht und Ermüdung werden nicht gerechnet. Schlanke Druckstäbe halten im Spiel, die in echt ausknicken würden.</li>
           </ul>
