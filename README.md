@@ -233,6 +233,22 @@ Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 - **Zufall:** Jede Nummer von 1 bis 99.999 ergibt auf jedem Gerät dasselbe Bauteil. Acht Bauformen (Kragarm, Träger, Konsole, Winkel, Rahmen, Mast, Galgen, Hänger) mit zufälligen Maßen, Aussparungen, manchmal einem vorgegebenen Loch, Lastangriff und Lastrichtung. Die Nummer steht im Link (`#nr-4711`), damit man ein Bauteil wiederholen oder weitergeben kann
 - **Bauen:** Im Baukasten Material aufziehen, Einspannung, Festlager, Loslager und eine Last an Außenkanten setzen; das Spiel prüft, ob das Bauteil gelagert ist, und bemisst die Last. Zum Start wird das zuletzt gezeigte Bauteil übernommen, man kann es also auch abwandeln. Beim Spielen steht das Bauteil im Link (`#bau-…`)
 
+## Herausfordern
+
+Nach einer Runde allein, die hält und ohne Live-Spannungen gespielt wurde, erzeugt „Kommilitonen herausfordern“ einen Link mit Bauteil, Spielart, Ergebnis und Namen (`#duell~…`). Wer ihn öffnet, spielt dasselbe Bauteil in derselben Spielart, ohne Live-Spannungen, und sieht am Ende, wer vorn liegt. Mit demselben Knopf geht das eigene Ergebnis zurück. Gespeichert wird nichts; die Links zeigen auf die öffentliche Seite (GitHub Pages), damit sie ohne VPN funktionieren.
+
+## Links zum Einstieg
+
+| Link | Startet mit |
+|---|---|
+| `#teil-1` bis `#teil-3` | Kragarm, Brücke, L-Winkel |
+| `#zufall` | einem neuen Zufallsbauteil |
+| `#bauen` | dem Baukasten, die Brücke als Vorlage |
+| `#nr-4711` | Zufallsbauteil Nr. 4711 |
+| `#bau-…` | einem eigenen Bauteil |
+| `#duell~…` | einer Herausforderung |
+| `#RAUMCODE` | dem Wettkampf, Raumcode schon eingetragen |
+
 ## Spielarten
 
 - **Blind:** Man entfernt Material, ohne die Spannungen zu sehen. Erst beim Abgeben rechnet die FEM. Eine Probe-Rechnung zeigt zwischendurch die Spannungen des aktuellen Entwurfs, bis man weiterarbeitet (allein eine, im Wettkampf legt die Spielleitung 0 bis 5 fest). Allein gibt es zum Üben zusätzlich Live-Spannungen.

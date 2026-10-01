@@ -88,6 +88,13 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .rules { font-size: 14px; color: var(--ink2); }
 .rules summary { cursor: pointer; font-weight: 600; color: var(--ink); }
 .rules ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+/* Herausforderung */
+.duel { border: 2px solid var(--accent); padding: 8px 10px; font-size: 14.5px; line-height: 1.5; display: grid; gap: 4px; }
+.duel p { margin: 0; }
+#b-duel { grid-column: 1 / -1; }
+.share { display: grid; gap: 8px; }
+.share-link { margin: 0; font: 12px/1.4 var(--f-mono); color: var(--ink2); overflow-wrap: anywhere; user-select: all; }
+.share-msg { margin: 0; font-size: 13px; color: var(--ink2); }
 /* Mehrspieler */
 .mp-box { display: grid; gap: 10px; font-size: 14.5px; }
 .mp-box h3 { margin: 6px 0 0; font: 700 13px var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink2); }
@@ -202,6 +209,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <button type="button" id="g-blind" aria-pressed="true">Blind</button>
           <button type="button" id="g-open" aria-pressed="false">Offene Karten</button>
         </div>
+        <div class="duel" id="duel" hidden></div>
         <div class="actions" id="act-design">
           <button class="btn primary" id="b-submit" type="button">Abgeben und rechnen</button>
           <button class="btn" id="b-probe" type="button">Probe-Rechnung</button>
@@ -214,8 +222,15 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
         </div>
         <div class="actions" id="act-result" hidden>
           <button class="btn primary" id="b-retry" type="button">Neuer Versuch</button>
+          <button class="btn" id="b-duel" type="button" hidden>Kommilitonen herausfordern</button>
           <button class="btn" id="b-eso" type="button">Lösung des Algorithmus</button>
           <button class="btn" id="b-next" type="button">Nächstes Bauteil</button>
+        </div>
+        <div class="share" id="share" hidden>
+          <label class="field">Ihr Name für die Herausforderung<input id="share-name" maxlength="16" autocomplete="nickname"></label>
+          <button class="btn" id="b-copy" type="button">Link kopieren</button>
+          <p class="share-link" id="share-link"></p>
+          <p class="share-msg" id="share-msg">Wer den Link öffnet, bekommt dasselbe Bauteil in derselben Spielart und muss Ihr Ergebnis schlagen.</p>
         </div>
 
         <div class="verdict" id="verdict" aria-live="polite"></div>
@@ -231,6 +246,16 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
             <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
+          </ul>
+        </details>
+        <details class="rules">
+          <summary>Was das Spiel vereinfacht</summary>
+          <ul>
+            <li>Gewertet wird der Mittelwert der Vergleichsspannung über eine Kachel, nicht die Spitze. An scharfen Innenecken wächst die Spitze in einer echten FE-Rechnung mit jeder Netzverfeinerung weiter (Singularität). Beispiel L-Winkel, Innenecke: Spitze im Eckelement 191, 261, 355 und 482 MPa bei 2, 4, 8 und 16 Elementen je Kachelkante, das Kachelmittel bleibt bei 135 MPa.</li>
+            <li>Das Netz ist fest, 4 × 4 Elemente je Kachel. Eine Konvergenzstudie macht das Spiel nicht.</li>
+            <li>Alle Ecken sind scharf. Echte Bauteile bekommen dort Radien, sonst entscheidet die Kerbe.</li>
+            <li>„Bruch“ heißt hier: Eine Kachel fließt im Mittel. Das ist kein Bruch im Sinne der Festigkeitslehre und kein Nachweis nach Norm.</li>
+            <li>Knicken, Eigengewicht und Ermüdung werden nicht gerechnet. Schlanke Druckstäbe halten im Spiel, die in echt ausknicken würden.</li>
           </ul>
         </details>
       </div>

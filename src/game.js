@@ -54,7 +54,9 @@
 
   // open: Spielart „Offene Karten“ (Spannungen sichtbar, jede Wegnahme endgültig, Versagen beendet das Spiel)
   let soloOpen = false;
-  const st = { li: 0, key: 0, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
+  // Herausforderung per Link: { key (Bauteil), open, pct10 (entfernte Prozent mal 10), name, part (Argumente für loadLevel) }
+  let duel = null;
+  const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', drag: null,
     eso: {}, esoRun: null, animId: 0, busy: false };
   let G = null;
@@ -485,7 +487,10 @@
     }
     $('b-probe').textContent = `Probe-Rechnung (${st.probes})`;
     $('b-probe').hidden = $('b-undo').hidden = $('b-reset').hidden = st.open;
-    $('live-row').hidden = st.open || edit;
+    $('live-row').hidden = st.open || edit || !!duel;   // in einer Herausforderung keine Live-Spannungen
+    // herausfordern nur mit einem gehaltenen Ergebnis, das ohne Live-Spannungen entstanden ist
+    $('b-duel').hidden = mp.on || st.phase !== 'result' || !st.res || !st.res.ok || st.practice;
+    if (st.phase !== 'result') $('share').hidden = true;
     const openRules = st.open || (mp.role === 'host' && mp.g.mo === 'o');   // der Beamer erklärt die Regeln der laufenden Runde
     $('howto').hidden = openRules || edit;
     $('howto-open').hidden = !openRules || edit;
@@ -521,7 +526,7 @@
       $('femline').textContent = '';
       $('verdict').innerHTML = `<p>${st.def.note}</p>${hint}`;
     }
-    panel(); controls(); render(); mpRender();
+    panel(); controls(); render(); mpRender(); duelRender();
   }
 
   // i: festes Bauteil, RANDOM mit Nummer oder CUSTOM mit Code als arg
@@ -529,12 +534,13 @@
     st.animId++;
     const def = i === RANDOM ? PARTS.generate(arg) : i === CUSTOM ? PARTS.fromCode(arg) || LEVELS[0] : LEVELS[i];
     st.li = i; st.def = def; st.key = def.nr ? 'z' + def.nr : def.code ? 'b' + def.code : i; st.L = FEM.level(def);
-    st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.busy = false;
+    if (duel && duel.key !== partKey()) duel = null;   // anderes Bauteil beendet die Herausforderung
+    st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
     st.drag = null; st.paint = null; st.hover = -1;
     $('stamp').hidden = true;
     document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
     // Zufalls- und eigene Bauteile im Link festhalten, damit man sie wiederholen oder weitergeben kann (Einladungslinks bleiben)
-    if (!mp.on && (i >= RANDOM || /^#(nr|bau)-/.test(location.hash))) {
+    if (!mp.on && !duel && (i >= RANDOM || /^#(nr|bau|duell)[-~]/.test(location.hash))) {
       const h = def.nr ? '#nr-' + def.nr : def.code ? '#bau-' + def.code : location.pathname + location.search;
       try { history.replaceState(null, '', h); } catch {}
     }
@@ -662,6 +668,44 @@
       h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${fmt(100 * e.res.maxUtil)} %. ${cmp}</p>`;
     }
     $('verdict').innerHTML = h;
+    duelRender();
+  }
+
+  // ---------- Herausforderung ----------
+  // Link mit Bauteil, Spielart, Ergebnis und Namen; wer ihn öffnet, spielt dasselbe Bauteil und versucht, das Ergebnis zu schlagen.
+  // Nichts wird gespeichert. Die Links gehen an die öffentliche Seite, die ohne VPN erreichbar ist (lokal zum Testen an die eigene).
+  const PUBLIC_URL = 'https://fkaule.github.io/Knackpunkt/';
+  const partKey = () => st.def.nr ? 'z' + st.def.nr : st.def.code ? 'b' + st.def.code : 'f' + st.li;
+  function parseDuel(hash) {
+    const m = /^#duell~(f[0-2]|z[1-9]\d{0,4}|b[^~]+)~([bo])~(\d{1,4})~([^~]*)$/.exec(hash);
+    if (!m || +m[3] > 1000) return null;
+    let name = '';
+    try { name = clean(decodeURIComponent(m[4]), 16); } catch {}
+    const k = m[1], part = k[0] === 'f' ? [+k[1]] : k[0] === 'z' ? [RANDOM, +k.slice(1)] : [CUSTOM, k.slice(1)];
+    if (part[0] === CUSTOM && !PARTS.fromCode(part[1])) return null;
+    return { key: k, open: m[2] === 'o', pct10: +m[3], name: name || 'Jemand', part };
+  }
+  function shareLink() {
+    const base = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? location.origin + location.pathname : PUBLIC_URL;
+    const pct10 = Math.round(removedPct(st.L, st.res.conn) * 10), name = clean($('share-name').value, 16) || 'Jemand';
+    return `${base}#duell~${partKey()}~${st.open ? 'o' : 'b'}~${pct10}~${encodeURIComponent(name)}`;
+  }
+  // oben im Bedienfeld: vor dem Werten das Ziel, danach der Ausgang
+  function duelRender() {
+    const el = $('duel');
+    el.hidden = !duel || mp.on || st.phase === 'edit';
+    if (el.hidden) return;
+    const who = esc(duel.name), goal = fmt(duel.pct10 / 10, 1) + ' %';
+    let h = `<p><b>Herausforderung von ${who}</b> (${duel.open ? 'offene Karten' : 'blind'}): ${who} hat ${goal} entfernt, ` +
+      'und das Bauteil hält. Schaffen Sie mehr?</p>';
+    if (st.phase === 'result' && st.res && !st.busy) {
+      const mine = st.res.ok ? Math.round(removedPct(st.L, st.res.conn) * 10) : -1;
+      h = mine > duel.pct10 ? `<p><span class="t-ok">Gewonnen!</span> ${fmt(mine / 10, 1)} % gegen ${goal} von ${who}.</p>`
+        : mine === duel.pct10 ? `<p><b>Gleichstand</b> mit ${who}: beide ${goal}.</p>`
+        : `<p><span class="t-bad">${who} liegt vorn:</span> ${goal} gegen ${mine < 0 ? 'Bruch' : fmt(mine / 10, 1) + ' %'}.</p>`;
+      h += `<p>„Neuer Versuch“ startet dasselbe Bauteil noch einmal${mine >= 0 ? ', „Kommilitonen herausfordern“ schickt Ihr Ergebnis zurück' : ''}.</p>`;
+    }
+    el.innerHTML = h;
   }
 
   function toggleEso() {
@@ -1517,7 +1561,7 @@
     $('m-mp').setAttribute('aria-pressed', String(on));
     $('levels').hidden = on; $('solo-ui').hidden = on; $('mp-ui').hidden = !on;
     $('live').checked = false;   // im Wettkampf keine Spannungen vorab
-    if (on) { mpScr = ''; netStart(); mpRender(); return; }
+    if (on) { duel = null; duelRender(); mpScr = ''; netStart(); mpRender(); return; }
     leaveRoom(false);
     $('drawing').hidden = false; $('mp-board').hidden = true; $('timer').hidden = true; $('tools').hidden = false;
     st.open = soloOpen;
@@ -1622,15 +1666,16 @@
   $('b-reset').onclick = resetAll;
   $('b-retry').onclick = () => {
     if (st.busy) return;
-    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design';
+    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.practice = $('live').checked;
     $('stamp').hidden = true; refresh();
   };
   $('b-eso').onclick = toggleEso;
   $('b-next').onclick = () => { if (!st.busy) loadLevel(Math.min(st.li + 1, RANDOM), newNr()); };
-  $('live').onchange = () => { if (editable()) { st.phase = 'design'; refresh(); } };
+  $('live').onchange = () => { if ($('live').checked) st.practice = true; if (editable()) { st.phase = 'design'; refresh(); } };
   // Spielart allein: Wechsel beginnt das Bauteil neu
   const setOpen = on => {
     if (st.busy) return;
+    if (duel && duel.open !== on) duel = null;   // andere Spielart beendet die Herausforderung
     soloOpen = st.open = on;
     $('g-blind').setAttribute('aria-pressed', String(!on));
     $('g-open').setAttribute('aria-pressed', String(on));
@@ -1639,6 +1684,24 @@
   };
   $('g-blind').onclick = () => setOpen(false);
   $('g-open').onclick = () => setOpen(true);
+  const SHARE_INFO = $('share-msg').textContent;
+  $('b-duel').onclick = () => {
+    const sh = $('share');
+    sh.hidden = !sh.hidden;
+    if (sh.hidden) return;
+    const n = store.get('name');
+    if (!$('share-name').value && typeof n === 'string') $('share-name').value = n;
+    $('share-link').textContent = shareLink();
+    $('share-msg').textContent = SHARE_INFO;
+  };
+  $('share-name').oninput = () => { $('share-link').textContent = shareLink(); };
+  $('b-copy').onclick = () => {
+    const link = shareLink(), name = clean($('share-name').value, 16);
+    if (name) store.set('name', name);
+    $('share-link').textContent = link;
+    const done = ok => { $('share-msg').textContent = ok ? 'Link kopiert. Schicken Sie ihn an Ihre Kommilitonen.' : 'Bitte den Link oben markieren und kopieren.'; };
+    if (navigator.clipboard) navigator.clipboard.writeText(link).then(() => done(true), () => done(false)); else done(false);
+  };
 
   $('levels').innerHTML = LEVELS.map((d, i) => `<button type="button" data-i="${i}">${i + 1} ${d.name}</button>`).join('') +
     `<button type="button" data-i="${RANDOM}" title="Jedes Mal ein neues Bauteil">Zufall</button>` +
@@ -1660,10 +1723,19 @@
   if (document.fonts) document.fonts.ready.then(render);
 
   readColors();
-  // Link auf ein Zufallsbauteil oder ein eigenes Bauteil
-  const linkNr = /^#nr-([1-9]\d{0,4})$/.exec(location.hash), linkBau = /^#bau-(.+)$/.exec(location.hash);
-  if (linkNr) loadLevel(RANDOM, +linkNr[1]);
+  // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen)
+  const hash = location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
+  duel = parseDuel(hash);
+  const clearHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch {} };
+  if (duel) {
+    soloOpen = st.open = duel.open;
+    $('g-blind').setAttribute('aria-pressed', String(!duel.open)); $('g-open').setAttribute('aria-pressed', String(duel.open));
+    loadLevel(...duel.part);
+  } else if (linkNr) loadLevel(RANDOM, +linkNr[1]);
   else if (linkBau && PARTS.fromCode(linkBau[1])) loadLevel(CUSTOM, linkBau[1]);
+  else if (linkTeil) { loadLevel(+linkTeil[1] - 1); clearHash(); }
+  else if (hash === '#zufall') loadLevel(RANDOM, newNr());
+  else if (hash === '#bauen') { loadLevel(1); openEditor(); clearHash(); }
   else loadLevel(0);
   if (/^#[A-Za-z0-9]{4}$/.test(location.hash)) setMode(true);   // Einladungslink mit Raumcode
 })();
