@@ -157,9 +157,19 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <p class="howto" id="howto-open" hidden><b>Offene Karten:</b> Nach jeder Wegnahme rechnet die FEM und zeigt die Spannungen.
             <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln.
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
+          <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
+            <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
+            <b>Last</b> per Klick auf eine Außenkante setzen, jeder weitere Klick dreht sie um 45°. Wie groß die Last ist, rechnet das Spiel aus. Beim Spielen steht das Bauteil im Link der Seite.</p>
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
             <button type="button" id="t-rect" aria-pressed="true">Rechteck</button>
             <button type="button" id="t-brush" aria-pressed="false">Pinsel</button>
+          </div>
+          <div class="tools" id="etools" role="group" aria-label="Baukasten" hidden>
+            <button type="button" data-t="form" aria-pressed="true">Material</button>
+            <button type="button" data-t="wand" aria-pressed="false">Einspannung</button>
+            <button type="button" data-t="fest" aria-pressed="false">Festlager</button>
+            <button type="button" data-t="los" aria-pressed="false">Loslager</button>
+            <button type="button" data-t="last" aria-pressed="false">Last</button>
           </div>
         </div>
         <div class="canvas-wrap" id="wrap">
@@ -198,6 +208,10 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <button class="btn" id="b-undo" type="button">Rückgängig</button>
           <button class="btn" id="b-reset" type="button">Alles zurück</button>
         </div>
+        <div class="actions" id="act-edit" hidden>
+          <button class="btn primary" id="b-play" type="button">Spielen</button>
+          <button class="btn" id="b-clear" type="button">Leeren</button>
+        </div>
         <div class="actions" id="act-result" hidden>
           <button class="btn primary" id="b-retry" type="button">Neuer Versuch</button>
           <button class="btn" id="b-eso" type="button">Lösung des Algorithmus</button>
@@ -228,6 +242,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 
 <script>
 <!--FEM-->
+<!--PARTS-->
 </script>
 <script>
 <!--GAME-->

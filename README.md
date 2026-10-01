@@ -1,6 +1,6 @@
 # Knackpunkt
 
-FEM-Minispiel: Aus einem Bauteil Kacheln entfernen, dann rechnet eine echte FE-Rechnung (ebener Spannungszustand, im Browser), ob es hält. Allein gegen den ESO-Algorithmus oder als Wettkampf mit Raumcode und Auflösung am Beamer, blind oder mit offenen Karten.
+FEM-Minispiel: Aus einem Bauteil Kacheln entfernen, dann rechnet eine echte FE-Rechnung (ebener Spannungszustand, im Browser), ob es hält. Allein gegen den ESO-Algorithmus oder als Wettkampf mit Raumcode und Auflösung am Beamer, blind oder mit offenen Karten. Neben drei festen Bauteilen gibt es Zufallsbauteile und einen Baukasten für eigene Bauteile.
 
 Allein üben: https://fkaule.github.io/Knackpunkt/
 
@@ -168,6 +168,8 @@ Die Lasten sind so gewählt, dass das Vollteil zu gut 50 % ausgelastet ist:
 
 Gesperrt und nicht entfernbar sind die Lastkacheln und die Kacheln unter Fest- und Loslager.
 
+Zufallsbauteile und eigene Bauteile werden genauso bemessen, nur automatisch: Das Vollteil wird mit 1 kN gerechnet. Weil das Modell linear ist, wächst die Auslastung proportional zur Last. Gewählt wird aus 1; 1,2; 1,5; 2; 2,5; 3; 4; 5; 6; 8; 10; 12; 15; 20; 25; 30; 40; 50; 60; 80; 100 kN der Wert, bei dem das Vollteil am nächsten an 55 % ausgelastet ist (in `src/parts.js`, Funktion `scale`). Lastrichtungen gibt es in Schritten von 45°.
+
 ### 9. Prüfung
 
 `npm test` rechnet einen schlanken Kragbalken (Länge 320 mm, Last 1 kN als Linienlast am freien Ende) und vergleicht die Durchbiegung mit dem Timoshenko-Balken
@@ -207,7 +209,8 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 ## Aufbau
 
 - `src/fem.js`: FE-Kern (Viereckelemente mit inkompatiblen Moden, Band-Cholesky, ESO), ohne DOM
-- `src/game.js`: Spiel, Zeichnung, Wettkampf (Presence über claude.ai-Raum oder eigenen Server)
+- `src/parts.js`: Zufallsbauteile aus einer Nummer, Baukasten-Prüfung, Bemessung der Last, Code für Links, ohne DOM
+- `src/game.js`: Spiel, Zeichnung, Baukasten, Wettkampf (Presence über claude.ai-Raum oder eigenen Server)
 - `src/shell.html`: Seite und Stil
 - `game.html`: gebaute Spieldatei (Seitenfragment), läuft als claude.ai-Artifact und über `server.mjs`
 - `index.html`: dieselbe Seite als vollständiges Dokument für GitHub Pages (Quelle `main`, Hauptverzeichnis, `.nojekyll`); dort gibt es nur „Allein üben“, der Wettkampf braucht den Server
@@ -218,11 +221,17 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 ```
 npm install
 npm run build   # game.html und index.html aus src/ bauen
-npm test        # FE-Kern gegen Balkentheorie, Mechanismus, ESO-Richtwert
+npm test        # FE-Kern gegen Balkentheorie, Mechanismus, ESO-Richtwert; Zufallsbauteile und Baukasten
 npm start       # Server auf PORT (Standard 8080)
 ```
 
 Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
+
+## Bauteile
+
+- **Fest:** Kragarm, Brücke, L-Winkel (Tabelle oben)
+- **Zufall:** Jede Nummer von 1 bis 99.999 ergibt auf jedem Gerät dasselbe Bauteil. Acht Bauformen (Kragarm, Träger, Konsole, Winkel, Rahmen, Mast, Galgen, Hänger) mit zufälligen Maßen, Aussparungen, manchmal einem vorgegebenen Loch, Lastangriff und Lastrichtung. Die Nummer steht im Link (`#nr-4711`), damit man ein Bauteil wiederholen oder weitergeben kann
+- **Bauen:** Im Baukasten Material aufziehen, Einspannung, Festlager, Loslager und eine Last an Außenkanten setzen; das Spiel prüft, ob das Bauteil gelagert ist, und bemisst die Last. Zum Start wird das zuletzt gezeigte Bauteil übernommen, man kann es also auch abwandeln. Beim Spielen steht das Bauteil im Link (`#bau-…`)
 
 ## Spielarten
 
@@ -231,7 +240,7 @@ Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 
 ## Wettkampf
 
-- Spielleitung: „Mehrspieler“, „Neues Spiel eröffnen“, Bauteil, Zeit und Spielart wählen, Runde starten
+- Spielleitung: „Mehrspieler“, „Neues Spiel eröffnen“, Bauteil, Zeit und Spielart wählen, Runde starten. Als Bauteil geht auch „Zufallsbauteil“ (jede Runde ein neues, alle bekommen dasselbe) und „Eigenes Bauteil“ (das zuletzt auf diesem Gerät im Baukasten gespielte)
 - Mitspielende: Link mit `#RAUMCODE` öffnen oder Code eintippen, Pseudonym eintragen
 - Blind: Die Spielleitung legt je Runde fest, wie viele Probe-Rechnungen jede Person hat (0 bis 5); der Beamer zeigt die verbrauchten Proben
 - Offene Karten: Der Beamer zeigt live, wie viel jede Person schon entfernt hat, grün heißt aufgehört, rot heißt Bruch. Wer bricht, ist in dieser Runde raus
