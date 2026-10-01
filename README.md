@@ -101,14 +101,27 @@ Die inneren Moden gehören zu keinem Nachbarelement und werden statisch kondensi
 
 Alle Elemente sind gleich große Quadrate, deshalb wird $`\mathbf K_e`$ nur einmal berechnet. Beim Quadrat hängt $`\mathbf K_e`$ nicht von $`h`$ ab, weil $`\mathbf B \sim 1/h`$ und $`\mathrm dA \sim h^2`$. In ANSYS entspricht das Element etwa PLANE182 mit Enhanced Strain (KEYOPT(1) = 2) im ebenen Spannungszustand mit Dicke.
 
+### 3a. Halbe Kacheln: Dreieckselemente
+
+Mit dem Werkzeug „Ecke“ lässt sich von einer Kachel eine Ecke schräg abschneiden. Übrig bleibt ein rechtwinkliges Dreieck mit 10 mm Katheten, also eine halbe Kachel. Das Netz bleibt dasselbe 2,5-mm-Raster: Rasterquadrate, die ganz im Material liegen, bleiben Viereckelemente; die vier Quadrate auf der Schnittkante werden durch ihre Diagonale geteilt, und die Hälfte im Material wird ein lineares Dreieckselement (CST, konstante Dehnung). Neue Knoten entstehen nicht.
+
+```math
+\mathbf K_e = t\,A\,\mathbf B^T \mathbf D\,\mathbf B, \qquad \boldsymbol\sigma_e = \mathbf D\,\mathbf B\,\mathbf u_e, \qquad
+\mathbf B = \frac{1}{2A}\begin{bmatrix} b_1 & 0 & b_2 & 0 & b_3 & 0 \\ 0 & c_1 & 0 & c_2 & 0 & c_3 \\ c_1 & b_1 & c_2 & b_2 & c_3 & b_3 \end{bmatrix}
+```
+
+mit $`b_i = y_j - y_k`$, $`c_i = x_k - x_j`$ (zyklisch) und $`A = h^2/2`$. Es gibt vier Lagen des Dreiecks, also vier Elementmatrizen, alle einmal vorab berechnet. Dreieck und Viereck teilen an gemeinsamen Elementkanten die Knoten, die Knotenverschiebung verläuft dort bei beiden linear. Die inneren Moden des Vierecks sind dort wie zwischen zwei Vierecken nicht konform; in der QM6-Form besteht das Viereck den Patchtest trotzdem, das Dreieck ohnehin.
+
+Lineare Dreiecke können keine Biegung im Element abbilden und sind deshalb steifer als die Vierecke. Weil sie nur als eine Reihe von 2,5-mm-Dreiecken entlang der Schnittkante liegen, bleibt das örtlich; an schrägen Kanten rechnet das Spiel etwas zu steif.
+
 ### 4. Gesamtsystem
 
-**Welche Kacheln gerechnet werden.** Zuerst prüft das Spiel den Zusammenhang über gemeinsame Kanten:
+**Welche Kacheln gerechnet werden.** Zuerst prüft das Spiel den Zusammenhang über gemeinsame Kanten. Verbunden sind zwei Nachbarn nur, wenn beide auf der gemeinsamen Kante Material haben; eine halbe Kachel hat das nur an ihren beiden Katheten:
 
 - Kacheln ohne Verbindung zu einem Lager fallen ab und zählen als entfernt.
 - Hat eine Lastkachel keine Verbindung mehr zu einem Lager, versagt der Entwurf sofort (Lastpfad unterbrochen).
 - Gerechnet werden nur Kacheln, die mit einer Lastkachel verbunden sind. Totes Material am Lager trägt nichts.
-- Berühren sich zwei Kacheln nur an einer Ecke, bekommen sie dort getrennte Knoten. Real hat dieser Kontakt keinen Querschnitt, im FE-Modell wäre er ein Gelenk, das Kraft überträgt.
+- Berühren sich Kacheln nur an einer Ecke, bekommen sie dort getrennte Knoten. Real hat dieser Kontakt keinen Querschnitt, im FE-Modell wäre er ein Gelenk, das Kraft überträgt. Allgemein bekommt an jeder Kachelecke jede Gruppe von Kacheln, die dort über Kanten zusammenhängt, einen eigenen Knoten (mit halben Kacheln sind bis zu vier Gruppen an einer Ecke möglich).
 
 **Aufbau und Randbedingungen.** $`\mathbf K = \sum_e \mathbf K_e`$ nach üblicher Assemblierung, dann $`\mathbf K\,\mathbf u = \mathbf f`$.
 
@@ -127,12 +140,14 @@ Die Spannungen werden im Mittelpunkt jedes Elements ausgewertet. Dort verschwind
 \boldsymbol\sigma_e = \mathbf D\,\mathbf B(0,0)\,\mathbf u_e
 ```
 
-Vergleichsspannung nach von Mises im ebenen Spannungszustand und Auslastung $`A_k`$ einer Kachel $`k`$ als Mittelwert über ihre 16 Elemente:
+Vergleichsspannung nach von Mises im ebenen Spannungszustand und Auslastung $`A_k`$ einer Kachel $`k`$ als flächengewichteter Mittelwert über ihre Elemente (Viereck $`w_e = 1`$, Dreieck $`w_e = 1/2`$; bei einer vollen Kachel also der Mittelwert über ihre 16 Elemente):
 
 ```math
 \sigma_v = \sqrt{\sigma_x^2 - \sigma_x\,\sigma_y + \sigma_y^2 + 3\,\tau_{xy}^2}, \qquad
-A_k = \frac{1}{16\,R_e}\sum_{e \in k} \sigma_{v,e}
+A_k = \frac{\sum_{e \in k} w_e\,\sigma_{v,e}}{R_e \sum_{e \in k} w_e}
 ```
+
+Eine halbe Kachel mittelt über die halbe Fläche und ist damit etwas strenger als eine ganze.
 
 Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager hat und keine Starrkörperbewegung möglich ist.
 
@@ -147,24 +162,26 @@ Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager 
 ### 6. Wertung
 
 ```math
-\text{entfernt} = 1 - \frac{\text{Kacheln mit Verbindung zu einem Lager}}{\text{Kacheln des Vollteils}}
+\text{entfernt} = 1 - \frac{\text{Fläche der Kacheln mit Verbindung zu einem Lager}}{\text{Kacheln des Vollteils}}
 ```
+
+Eine halbe Kachel zählt halb.
 
 Die Punkte sind die entfernten Prozent, bei Versagen 0. Masse je Kachel: $`1\,\mathrm{cm^3} \cdot \text{7,85}\,\mathrm{g/cm^3} = \text{7,85}\,\mathrm g`$.
 
 ### 7. Gegner: Evolutionäre Strukturoptimierung (ESO)
 
-Nach Xie und Steven: Ausgehend vom Vollteil werden die Kacheln nach Auslastung sortiert. Die am geringsten ausgelastete Kachel, deren Wegnahme den Nachweis noch erfüllt, wird entfernt, danach wird neu gerechnet. Das wiederholt sich, bis keine Kachel mehr entfernt werden kann. Das Verfahren ist gierig und endet in einem lokalen Optimum, deshalb ist es schlagbar.
+Nach Xie und Steven: Ausgehend vom Vollteil werden die Kacheln nach Auslastung sortiert. Die am geringsten ausgelastete Kachel, deren Wegnahme den Nachweis noch erfüllt, wird entfernt, danach wird neu gerechnet. Das wiederholt sich, bis keine Kachel mehr entfernt werden kann. Danach glättet das Verfahren auf dieselbe Weise: Es schneidet freie Ecken ab (beide angrenzenden Kanten liegen frei) und nimmt halbe Kacheln ganz weg, solange es hält. Das Verfahren ist gierig und endet in einem lokalen Optimum, deshalb ist es schlagbar.
 
 ### 8. Bauteile und Lasten
 
 Die Lasten sind so gewählt, dass das Vollteil zu gut 50 % ausgelastet ist:
 
-| Bauteil | Lager | Last (Linienlast) | Auslastung Vollteil | ESO entfernt |
+| Bauteil | Lager | Last (Linienlast) | Auslastung Vollteil | ESO entfernt (ganze Kacheln, mit Glättung) |
 |---|---|---|---|---|
-| Kragarm 160 × 80 mm | linke Kante eingespannt | 10 kN nach unten auf 20 mm der rechten Kante, mittig | 55,9 % | 58,6 % |
-| Brücke 200 × 60 mm | Festlager links, Loslager rechts, je 10 mm | 20 kN nach unten auf 20 mm der Oberkante, mittig | 50,6 % | 60,0 % |
-| L-Winkel 120 × 120 mm, Schenkel 50 mm breit | obere Kante des senkrechten Schenkels eingespannt | 6 kN nach unten auf 10 mm am Ende des waagrechten Schenkels | 57,3 % | 53,7 % |
+| Kragarm 160 × 80 mm | linke Kante eingespannt | 10 kN nach unten auf 20 mm der rechten Kante, mittig | 55,9 % | 58,6 %, 64,5 % |
+| Brücke 200 × 60 mm | Festlager links, Loslager rechts, je 10 mm | 20 kN nach unten auf 20 mm der Oberkante, mittig | 50,6 % | 60,0 %, 64,2 % |
+| L-Winkel 120 × 120 mm, Schenkel 50 mm breit | obere Kante des senkrechten Schenkels eingespannt | 6 kN nach unten auf 10 mm am Ende des waagrechten Schenkels | 57,3 % | 53,7 %, 55,3 % |
 
 Gesperrt und nicht entfernbar sind die Lastkacheln und die Kacheln unter Fest- und Loslager.
 
@@ -185,7 +202,7 @@ sowie die Biegespannung im Elementmittelpunkt der obersten Elementreihe nahe der
 | 10 mm | 4 | 62,412 mm | 62,463 mm | -0,08 % | 714,35 MPa | 714,38 MPa | 0,00 % |
 | 20 mm | 8 | 7,815 mm | 7,826 mm | -0,13 % | 208,36 MPa | 208,36 MPa | 0,00 % |
 
-Weitere Tests: Eine Brücke nur auf dem Loslager wird als Mechanismus erkannt, nur auf dem Festlager nicht. ESO entfernt beim Kragarm 75 von 128 Kacheln.
+Weitere Tests: Eine Brücke nur auf dem Loslager wird als Mechanismus erkannt, nur auf dem Festlager nicht. ESO entfernt beim Kragarm 75 von 128 Kacheln, mit Glättung 64,5 %. Die Dreieckselemente bestehen den Patchtest (Starrkörperbewegung ohne Kräfte, konstante Dehnung exakt). Ein schräger Steg aus Dreiecken trägt, eine Diagonale aus Kacheln, die sich nur an den Ecken berühren, nicht. Volle Kacheln rechnen bitgleich wie vor der Einführung der halben Kacheln (geprüft an 320 Zufallsentwürfen).
 
 Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Netz (PLANE182, Enhanced Strain, ebener Spannungszustand, Dicke 10 mm), verglichen über die Vergleichsspannung im Elementmittelpunkt.
 
@@ -194,6 +211,7 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 | Schritt | Stelle |
 |---|---|
 | Werkstoff, Element, Kondensation, Spannungsmatrix $`\mathbf D\,\mathbf B(0,0)`$ | Block `KE, S` am Anfang |
+| Halbe Kacheln: Zustände, Rasterquadrate, Dreieckselemente | `SIDES`, `CORNERS`, `squareKind()`, Block `TK, TS` |
 | Lager und Lasten als Knotenwerte, gesperrte Kacheln | `level()` |
 | Zusammenhang über Kanten | `connect()` |
 | Eckkontakt, Nummerierung, Assemblierung, Cholesky, Spannungen, Auslastung | `analyze()` |

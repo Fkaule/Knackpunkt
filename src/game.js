@@ -61,7 +61,8 @@
     eso: {}, esoRun: null, animId: 0, busy: false };
   let G = null;
   const C = {};
-  const removedPct = (L, conn) => 100 * (1 - count(conn) / count(L.domain));
+  // entfernt in Prozent; halbe Kacheln (abgeschnittene Ecke) zählen halb
+  const removedPct = (L, solid, conn) => 100 * (1 - FEM.area(solid, conn) / count(L.domain));
 
   function readColors() {
     const cs = getComputedStyle(document.documentElement);
@@ -149,23 +150,30 @@
     return tx < 0 || ty < 0 || tx >= st.L.TX || ty >= st.L.TY ? -1 : tx + ty * st.L.TX;
   }
 
-  // Randkanten einer Kachelmenge (in Kacheleinheiten), gleichgerichtete Stücke zusammengefasst
+  // Randkanten einer Kachelmenge (Werte: Kachelzustände, in Kacheleinheiten), gleichgerichtete Stücke zusammengefasst;
+  // halbe Kacheln liefern dazu ihre schräge Kante
   function edges(set) {
-    const L = st.L, out = [];
-    const has = (x, y) => x >= 0 && y >= 0 && x < L.TX && y < L.TY && set[x + y * L.TX];
+    const L = st.L, out = [], diag = [];
+    const has = (x, y, bit) => x >= 0 && y >= 0 && x < L.TX && y < L.TY && (FEM.SIDES[set[x + y * L.TX]] & bit);
     for (let k = 0; k < L.nT; k++) if (set[k]) {
-      const x = k % L.TX, y = (k - x) / L.TX;
-      if (!has(x, y - 1)) out.push([x, y, x + 1, y]);
-      if (!has(x, y + 1)) out.push([x, y + 1, x + 1, y + 1]);
-      if (!has(x - 1, y)) out.push([x, y, x, y + 1]);
-      if (!has(x + 1, y)) out.push([x + 1, y, x + 1, y + 1]);
+      const x = k % L.TX, y = (k - x) / L.TX, sd = FEM.SIDES[set[k]];
+      if ((sd & 4) && !has(x, y - 1, 8)) out.push([x, y, x + 1, y]);
+      if ((sd & 8) && !has(x, y + 1, 4)) out.push([x, y + 1, x + 1, y + 1]);
+      if ((sd & 1) && !has(x - 1, y, 2)) out.push([x, y, x, y + 1]);
+      if ((sd & 2) && !has(x + 1, y, 1)) out.push([x + 1, y, x + 1, y + 1]);
+      if (set[k] > 1) diag.push(set[k] === 3 || set[k] === 5 ? [x, y, x + 1, y + 1] : [x + 1, y, x, y + 1]);
     }
     const h = out.filter(q => q[1] === q[3]).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     const v = out.filter(q => q[0] === q[2]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const merged = [];
     for (const q of h) { const p = merged.at(-1); if (p && p[1] === p[3] && p[1] === q[1] && p[2] === q[0]) p[2] = q[2]; else merged.push(q); }
     for (const q of v) { const p = merged.at(-1); if (p && p[0] === p[2] && p[0] === q[0] && p[3] === q[1]) p[3] = q[3]; else merged.push(q); }
-    return merged;
+    return merged.concat(diag);
+  }
+  // Ecken einer Kachel auf dem Bildschirm (unten links, unten rechts, oben rechts, oben links), bei halben Kacheln ohne die abgeschnittene
+  function shapePts(k, s) {
+    const [x, y] = tileRect(k), q = [[x, y + G.s], [x + G.s, y + G.s], [x + G.s, y], [x, y]];
+    return s === 1 ? q : q.filter((_, i) => i !== s - 2);
   }
   function strokeSegs(segs) {
     ctx.beginPath();
@@ -174,7 +182,11 @@
   }
   function tilesPath(set) {
     ctx.beginPath();
-    for (let k = 0; k < st.L.nT; k++) if (set[k]) { const [x, y] = tileRect(k); ctx.rect(x, y, G.s, G.s); }
+    for (let k = 0; k < st.L.nT; k++) if (set[k]) {
+      const p = shapePts(k, set[k]);
+      p.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+      ctx.closePath();
+    }
   }
   function hatch(set, gap, both) {
     if (!set.some(Boolean)) return;
@@ -187,27 +199,27 @@
     }
     ctx.stroke(); ctx.restore();
   }
-  // Verformter Umriss einer Kachel aus ihren 4 M Randknoten, Verschiebung in mm mal Überhöhung
+  // Verformter Umriss einer Kachel aus ihren Randknoten (gegen den Uhrzeigersinn, ohne abgeschnittene Ecke),
+  // Verschiebung in mm mal Überhöhung; r.disp hält je Kachel die Verschiebungen ihrer Rasterknoten
   function tilePoly(r, k, scale) {
-    const L = st.L, tx = k % L.TX, ty = (k - tx) / L.TX, i0 = tx * M, j0 = ty * M, pts = [];
-    const ring = [];
-    for (let a = 0; a < M; a++) ring.push([i0 + a, j0]);
-    for (let a = 0; a < M; a++) ring.push([i0 + M, j0 + a]);
-    for (let a = 0; a < M; a++) ring.push([i0 + M - a, j0 + M]);
-    for (let a = 0; a < M; a++) ring.push([i0, j0 + M - a]);
-    for (const [i, j] of ring) {
-      const ex = Math.min(i, i0 + M - 1), ey = Math.min(j, j0 + M - 1), ci = i - ex, cj = j - ey;
-      const c = cj ? (ci ? 2 : 3) : (ci ? 1 : 0), e = ex + ey * L.nx;
-      pts.push([X(i) + scale * r.disp[e * 8 + 2 * c] / TILE * G.s, Y(j) - scale * r.disp[e * 8 + 2 * c + 1] / TILE * G.s]);
-    }
+    const L = st.L, tx = k % L.TX, ty = (k - tx) / L.TX, s = r.solid[k], R = M + 1, pts = [];
+    const cs = [[0, 0], [M, 0], [M, M], [0, M]].filter((_, i) => s === 1 || i !== s - 2);
+    cs.forEach(([a0, b0], n) => {
+      const [a1, b1] = cs[(n + 1) % cs.length];
+      for (let t = 0; t < M; t++) {
+        const a = a0 + (a1 - a0) * t / M, b = b0 + (b1 - b0) * t / M, o = (k * R * R + b * R + a) * 2;
+        pts.push([X(tx * M + a) + scale * r.disp[o] / TILE * G.s, Y(ty * M + b) - scale * r.disp[o + 1] / TILE * G.s]);
+      }
+    });
     return pts;
   }
   function nodeU(r, i, j) {
-    const L = st.L;
-    for (const [ex, ey, c] of [[i - 1, j - 1, 2], [i, j - 1, 3], [i - 1, j, 1], [i, j, 0]]) {
-      if (ex < 0 || ey < 0 || ex >= L.nx || ey >= L.ny || !r.fe[((ex / M) | 0) + ((ey / M) | 0) * L.TX]) continue;
-      const e = ex + ey * L.nx;
-      return [r.disp[e * 8 + 2 * c], r.disp[e * 8 + 2 * c + 1]];
+    const L = st.L, R = M + 1;
+    for (const tx of [Math.floor(i / M), Math.floor((i - 1) / M)]) for (const ty of [Math.floor(j / M), Math.floor((j - 1) / M)]) {
+      const k = tx + ty * L.TX, a = i - tx * M, b = j - ty * M;
+      if (tx < 0 || ty < 0 || tx >= L.TX || ty >= L.TY || !r.fe[k] || !FEM.inShape(r.solid[k], a, b)) continue;
+      const o = (k * R * R + b * R + a) * 2;
+      return [r.disp[o], r.disp[o + 1]];
     }
     return [0, 0];
   }
@@ -231,8 +243,12 @@
     if (st.view.mode === 'blind') {
       drawBlind(st.solid, st.conn, true);
       if (st.hover >= 0 && st.paint == null && st.L.domain[st.hover] && !st.L.frozen[st.hover] && editable()) {
-        const [x, y] = tileRect(st.hover);
-        ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, G.s - 2, G.s - 2);
+        const k = st.hover;
+        ctx.save(); ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
+        if (st.tool === 'corner') {   // Vorschau: die Form nach dem Klick, gestrichelt; fällt alles weg, die jetzige
+          ctx.setLineDash([4, 3]); polyPath(shapePts(k, cornerAction(k, st.hoverC, st.hoverIn) || st.solid[k] || 1)); ctx.stroke();
+        } else { const [x, y] = tileRect(k); ctx.strokeRect(x + 1, y + 1, G.s - 2, G.s - 2); }
+        ctx.restore();
       }
     } else drawResult(st.view);
     if (st.drag) drawDrag();
@@ -244,7 +260,7 @@
   // Vorschau beim Aufziehen: so sieht es nach dem Loslassen aus
   function drawDrag() {
     const d = st.drag, s = G.s, set = new Uint8Array(st.L.nT);
-    for (const k of rectTiles(d)) set[k] = 1;
+    for (const k of rectTiles(d)) set[k] = st.paint ? 1 : st.solid[k];
     const x0 = Math.min(d.a[0], d.b[0]), x1 = Math.max(d.a[0], d.b[0]), y0 = Math.min(d.a[1], d.b[1]), y1 = Math.max(d.a[1], d.b[1]);
     ctx.save();
     ctx.globalAlpha = 0.75; ctx.fillStyle = st.paint ? C.steel : C.sheet; tilesPath(set); ctx.fill();
@@ -269,14 +285,17 @@
     const L = st.L, s = G.s;
     const set = new Uint8Array(L.nT), fro = new Uint8Array(L.nT), loose = new Uint8Array(L.nT);
     for (let k = 0; k < L.nT; k++) if (solid[k] && (!only || only(k))) {
-      if (conn[k]) { set[k] = 1; fro[k] = L.frozen[k]; } else loose[k] = 1;
+      if (conn[k]) { set[k] = solid[k]; fro[k] = L.frozen[k]; } else loose[k] = solid[k];
     }
     ctx.fillStyle = C.steel; tilesPath(set); ctx.fill();
     hatch(set, s / 3.2, false);
     ctx.fillStyle = C.steel2; tilesPath(fro); ctx.fill();
     hatch(fro, s / 4, true);
     ctx.strokeStyle = C.steel2; ctx.lineWidth = 1; ctx.beginPath();
-    for (let k = 0; k < L.nT; k++) if (set[k]) { const [x, y] = tileRect(k); ctx.rect(x + 0.5, y + 0.5, s - 1, s - 1); }
+    for (let k = 0; k < L.nT; k++) {
+      if (set[k] === 1) { const [x, y] = tileRect(k); ctx.rect(x + 0.5, y + 0.5, s - 1, s - 1); }
+      else if (set[k]) { shapePts(k, set[k]).forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); }
+    }
     ctx.stroke();
     ctx.strokeStyle = C.ink; ctx.lineWidth = Math.max(1.5, s * 0.08); ctx.lineCap = 'square';
     strokeSegs(edges(set));
@@ -300,12 +319,14 @@
     } else {
       if (sweepCol < L.TX) drawBlind(v.solid, r.conn, false, k => k % L.TX >= sweepCol);
       const scale = v.scale * (v.defo == null ? 1 : v.defo);
-      if (scale) { ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = C.ink2; ctx.lineWidth = 1; strokeSegs(edges(r.fe)); ctx.restore(); }
+      if (scale) {
+        ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = C.ink2; ctx.lineWidth = 1;
+        strokeSegs(edges(Uint8Array.from(r.fe, (f, k) => f ? r.solid[k] : 0))); ctx.restore();
+      }
       for (let k = 0; k < L.nT; k++) {
         if (!r.conn[k] || falling(k) || k % L.TX >= sweepCol) continue;
         if (!r.fe[k]) {   // hängt am Lager, trägt aber nichts
-          const [x, y] = tileRect(k);
-          ctx.fillStyle = C.steel; ctx.fillRect(x, y, s, s); ctx.strokeStyle = C.rule; ctx.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+          polyPath(shapePts(k, r.solid[k])); ctx.fillStyle = C.steel; ctx.fill(); ctx.strokeStyle = C.rule; ctx.lineWidth = 1; ctx.stroke();
           continue;
         }
         const p = tilePoly(r, k, scale);
@@ -322,7 +343,7 @@
       if (sweepCol >= L.TX && !(v.fall && v.fall.p > 0)) drawMax(r, scale);
     }
     if (v.loose) drawFalling(v.loose.set, v.loose.p, () => C.steel);
-    else drawLoose(v.solid.map((x, k) => x && !r.conn[k] ? 1 : 0));
+    else drawLoose(v.solid.map((x, k) => x && !r.conn[k] ? x : 0));
     if (v.fall) drawFalling(v.fall.set, v.fall.p, k => r.disp && r.fe[k] ? bandOf(r.tileUtil[k]) : C.steel);
   }
 
@@ -331,12 +352,13 @@
     const s = G.s;
     ctx.save(); ctx.globalAlpha = 1 - clamp01((p - 0.65) / 0.35);
     for (let k = 0; k < st.L.nT; k++) if (set[k]) {
-      const [x, y] = tileRect(k), h = ((k * 2654435761) >>> 0) / 4294967296;
+      const [x, y] = tileRect(k), h = ((k * 2654435761) >>> 0) / 4294967296, cx = x + s / 2, cy = y + s / 2;
       ctx.save();
-      ctx.translate(x + s / 2 + (h - 0.5) * s * 1.5 * p, y + s / 2 + p * p * (G.H * 0.9 + s * 2 * h));
+      ctx.translate(cx + (h - 0.5) * s * 1.5 * p, cy + p * p * (G.H * 0.9 + s * 2 * h));
       ctx.rotate((h - 0.5) * 2.4 * p);
-      ctx.fillStyle = color(k); ctx.fillRect(-s / 2, -s / 2, s, s);
-      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.strokeRect(-s / 2, -s / 2, s, s);
+      polyPath(shapePts(k, set[k]).map(([px, py]) => [px - cx, py - cy]));
+      ctx.fillStyle = color(k); ctx.fill();
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
     }
     ctx.restore();
@@ -457,7 +479,7 @@
   function panel() {
     if (st.phase === 'edit') return edPanel();
     const L = st.L, d = st.def, total = count(L.domain);
-    const kept = count(st.phase === 'eso' ? st.eso[st.key].res.conn : st.conn);
+    const e = st.eso[st.key], kept = st.phase === 'eso' ? FEM.area(e.solid, e.res.conn) : FEM.area(st.solid, st.conn);
     $('tb-name').textContent = partName(d);
     $('tb-load').textContent = loadLabel(d.loads[0]);
     $('tb-size').textContent = `${d.tx * TILE} × ${d.ty * TILE} × ${THICK} mm`;
@@ -498,13 +520,13 @@
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
-    $('t-rect').disabled = $('t-brush').disabled = !design || st.busy;
+    $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = !design || st.busy;
     cv.classList.toggle('locked', !design);
   }
 
   // Nach jeder Änderung im Entwurf
   function refresh() {
-    st.conn = FEM.connect(st.L, st.solid, st.L.supportTiles);
+    st.conn = FEM.attached(st.L, st.solid);
     const loose = st.solid.some((x, k) => x && !st.conn[k]);
     const hint = loose ? '<p>Rot gestrichelte Kacheln haben keine Verbindung zum Lager und fallen beim Abgeben ab.</p>' : '';
     if (st.open && st.phase === 'design') {
@@ -514,7 +536,7 @@
       showFem(r, 0);
       st.liveText = `Offene Karten: ${statusText(r)} Jede Wegnahme ist endgültig.`;
       $('verdict').innerHTML = `<p>${st.liveText}</p>${hint}`;
-      if (mp.role === 'player') pres({ rm: Math.round(removedPct(st.L, st.conn) * 10) });   // Fortschritt für den Beamer
+      if (mp.role === 'player') pres({ rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });   // Fortschritt für den Beamer
     } else if (!mp.on && $('live').checked) {
       const r = FEM.analyze(st.L, st.solid);
       st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
@@ -611,16 +633,15 @@
     const L = st.L, r = FEM.analyze(L, st.solid), fe = !!r.disp;
     st.res = r; st.phase = 'result'; st.busy = true;
     const loose = new Uint8Array(L.nT);
-    for (let k = 0; k < L.nT; k++) loose[k] = st.solid[k] && !r.conn[k] ? 1 : 0;
+    for (let k = 0; k < L.nT; k++) loose[k] = st.solid[k] && !r.conn[k] ? st.solid[k] : 0;
     // Was nach dem Versagen abfällt: überlastete Kacheln und alles, was dann nicht mehr am Lager hängt
     let fall = null;
     if (r.reason === 'spannung') {
-      const rest = r.conn.slice();
-      for (let k = 0; k < L.nT; k++) if (r.tileUtil[k] > 1) rest[k] = 0;
-      const keep = FEM.connect(L, rest, L.supportTiles);
+      const rest = Uint8Array.from(st.solid, (s, k) => r.conn[k] && !(r.tileUtil[k] > 1) ? s : 0);
+      const keep = FEM.attached(L, rest);
       fall = new Uint8Array(L.nT);
-      for (let k = 0; k < L.nT; k++) fall[k] = r.conn[k] && !keep[k] ? 1 : 0;
-    } else if (r.reason === 'mechanismus') fall = r.fe.slice();
+      for (let k = 0; k < L.nT; k++) fall[k] = r.conn[k] && !keep[k] ? st.solid[k] : 0;
+    } else if (r.reason === 'mechanismus') fall = Uint8Array.from(r.fe, (f, k) => f ? st.solid[k] : 0);
     const v = st.view = { mode: 'result', res: r, solid: st.solid, scale: fe ? niceScale(r) : 0, sweep: fe ? 0 : 1,
       defo: 0, t: 0, loose: { set: loose, p: 0 }, fall: fall && { set: fall, p: 0 } };
     showFem(r, v.scale);
@@ -647,7 +668,7 @@
   }
 
   function verdict() {
-    const r = st.res, L = st.L, total = count(L.domain), rem = removedPct(L, r.conn), e = st.eso[st.key];
+    const r = st.res, L = st.L, rem = removedPct(L, r.solid, r.conn), e = st.eso[st.key];
     let h;
     if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${fmt(100 * r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
     else {
@@ -661,7 +682,7 @@
     }
     if (!e) h += '<p>Der Algorithmus rechnet noch …</p>';
     else {
-      const er = 100 * (1 - count(e.res.conn) / total);
+      const er = removedPct(L, e.solid, e.res.conn);
       let cmp = '';
       if (r.ok) cmp = rem > er + 1e-9 ? 'Algorithmus geschlagen!' : rem > er - 1e-9 ? 'Gleichstand mit dem Algorithmus.'
         : er - rem <= 5 ? 'Knapp dran.' : 'Da geht noch was.';
@@ -687,7 +708,7 @@
   }
   function shareLink() {
     const base = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? location.origin + location.pathname : PUBLIC_URL;
-    const pct10 = Math.round(removedPct(st.L, st.res.conn) * 10), name = clean($('share-name').value, 16) || 'Jemand';
+    const pct10 = Math.round(removedPct(st.L, st.res.solid, st.res.conn) * 10), name = clean($('share-name').value, 16) || 'Jemand';
     return `${base}#duell~${partKey()}~${st.open ? 'o' : 'b'}~${pct10}~${encodeURIComponent(name)}`;
   }
   // oben im Bedienfeld: vor dem Werten das Ziel, danach der Ausgang
@@ -699,7 +720,7 @@
     let h = `<p><b>Herausforderung von ${who}</b> (${duel.open ? 'offene Karten' : 'blind'}): ${who} hat ${goal} entfernt, ` +
       'und das Bauteil hält. Schaffen Sie mehr?</p>';
     if (st.phase === 'result' && st.res && !st.busy) {
-      const mine = st.res.ok ? Math.round(removedPct(st.L, st.res.conn) * 10) : -1;
+      const mine = st.res.ok ? Math.round(removedPct(st.L, st.res.solid, st.res.conn) * 10) : -1;
       h = mine > duel.pct10 ? `<p><span class="t-ok">Gewonnen!</span> ${fmt(mine / 10, 1)} % gegen ${goal} von ${who}.</p>`
         : mine === duel.pct10 ? `<p><b>Gleichstand</b> mit ${who}: beide ${goal}.</p>`
         : `<p><span class="t-bad">${who} liegt vorn:</span> ${goal} gegen ${mine < 0 ? 'Bruch' : fmt(mine / 10, 1) + ' %'}.</p>`;
@@ -716,11 +737,11 @@
       showFem(st.res, st.view.scale); stamp(st.res.ok); verdict();
     } else {
       st.resultView = st.view; st.phase = 'eso';
-      st.view = { mode: 'result', res: e.res, solid: e.res.conn, scale: niceScale(e.res) };
+      st.view = { mode: 'result', res: e.res, solid: e.solid, scale: niceScale(e.res) };
       $('stamp').hidden = true; showFem(e.res, st.view.scale);
-      const er = 100 * (1 - count(e.res.conn) / count(st.L.domain));
-      $('verdict').innerHTML = `<p>Lösung der Evolutionären Strukturoptimierung: ${fmt(er, 1)} % entfernt in ${e.order.length} Schritten, ` +
-        `max. Auslastung ${fmt(100 * e.res.maxUtil)} %.</p>`;
+      const er = removedPct(st.L, e.solid, e.res.conn);
+      $('verdict').innerHTML = `<p>Lösung der Evolutionären Strukturoptimierung: ${fmt(er, 1)} % entfernt, ${e.order.length} ganze Kacheln ` +
+        `und ${e.cuts.length} ${e.cuts.length === 1 ? 'Ecke' : 'Ecken'} zum Glätten, max. Auslastung ${fmt(100 * e.res.maxUtil)} %.</p>`;
     }
     panel(); controls(); render();
   }
@@ -1053,24 +1074,21 @@
     mpRender();
   }
 
-  // Entwurf als 6 Bit je Zeichen; fremde Entwürfe werden geprüft: gesperrte Kacheln bleiben, außerhalb des Bauteils nichts
+  // Entwurf: je Zeichen zwei Kacheln mit je 3 Bit (Zustand 0 bis 5); fremde Entwürfe werden geprüft:
+  // gesperrte Kacheln bleiben voll, außerhalb des Bauteils nichts
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
   function encode(solid) {
     let s = '';
-    for (let i = 0; i < solid.length; i += 6) {
-      let v = 0;
-      for (let b = 0; b < 6; b++) v = v * 2 + (solid[i + b] ? 1 : 0);
-      s += B64[v];
-    }
+    for (let i = 0; i < solid.length; i += 2) s += B64[solid[i] * 8 + (solid[i + 1] || 0)];
     return s;
   }
   function decode(str, L) {
-    if (typeof str !== 'string' || str.length !== Math.ceil(L.nT / 6)) return null;
+    if (typeof str !== 'string' || str.length !== Math.ceil(L.nT / 2)) return null;
     const out = new Uint8Array(L.nT);
     for (let i = 0; i < str.length; i++) {
       const v = B64.indexOf(str[i]);
       if (v < 0) return null;
-      for (let b = 0; b < 6; b++) if (i * 6 + b < L.nT) out[i * 6 + b] = (v >> (5 - b)) & 1;
+      for (const [k, x] of [[2 * i, v >> 3], [2 * i + 1, v & 7]]) if (k < L.nT) out[k] = x <= 5 ? x : 0;
     }
     for (let k = 0; k < L.nT; k++) out[k] = L.domain[k] ? (L.frozen[k] ? 1 : out[k]) : 0;
     return out;
@@ -1141,7 +1159,7 @@
     Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1 });
     // blind: auch direkt nach einer Probe-Rechnung wird der Entwurf wieder ohne Spannungen gezeigt
     if (!st.open) { st.view = { mode: 'blind' }; $('legend').hidden = true; $('femline').textContent = ''; }
-    pres({ r: mp.rid, s: 1, d: encode(st.solid), rm: Math.round(removedPct(st.L, st.conn) * 10) });
+    pres({ r: mp.rid, s: 1, d: encode(st.solid), rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });
     controls(); render(); mpRender();
   }
   // Offene Karten im Wettkampf: das Bauteil ist gebrochen, die Person ist in dieser Runde raus
@@ -1225,7 +1243,7 @@
       const q = p.presence, solid = q.r === mp.g.rid && q.s === 1 ? decode(q.d, L) : null;
       if (!solid) continue;
       const res = FEM.analyze(L, solid);
-      list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, res.conn) * 10) / 10,
+      list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, solid, res.conn) * 10) / 10,
         pu: probesUsed(q) });
     }
     for (const e of list) {
@@ -1303,13 +1321,16 @@
       const tx = k % L.TX, ty = (k - tx) / L.TX, x = x0 + s / 2 + tx * s, y = H - s / 2 - (ty + 1) * s;
       if (!solid[k] || (r && !r.conn[k])) { c.strokeStyle = C.grid; c.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1); continue; }
       c.fillStyle = r && r.disp && r.fe[k] ? bandOf(r.tileUtil[k]) : L.frozen[k] ? C.steel2 : C.steel;
-      c.fillRect(x, y, s, s);
-      c.strokeStyle = 'rgba(8,16,28,0.2)'; c.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+      c.beginPath();   // Quadrat oder Dreieck ohne die abgeschnittene Ecke
+      [[x, y + s], [x + s, y + s], [x + s, y], [x, y]].filter((_, i) => solid[k] === 1 || i !== solid[k] - 2)
+        .forEach(([px, py], i) => i ? c.lineTo(px, py) : c.moveTo(px, py));
+      c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(8,16,28,0.2)'; c.stroke();
     }
   }
 
   // ---------- Wettkampf: Anzeige ----------
-  const esoNow = () => st.eso[st.key] ? removedPct(st.L, st.eso[st.key].res.conn) : null;
+  const esoNow = () => st.eso[st.key] ? removedPct(st.L, st.eso[st.key].solid, st.eso[st.key].res.conn) : null;
   // Platz je Eintrag der sortierten Liste; gleicher Wert gleicher Platz, alle Brüche teilen sich den letzten
   const places = list => list.map((e, i) => {
     let p = i;
@@ -1524,7 +1545,7 @@
       const me = myPeer(), i = res.findIndex(e => e.peer === me), r = mp.own;
       let t = 'Rechnet …';
       if (r) {
-        t = r.ok ? `<span class="t-ok">Hält.</span> Sie haben ${fmt(removedPct(st.L, r.conn), 1)} % entfernt.`
+        t = r.ok ? `<span class="t-ok">Hält.</span> Sie haben ${fmt(removedPct(st.L, r.solid, r.conn), 1)} % entfernt.`
           : `<span class="t-bad">Bruch.</span> ${failWhy(r)} Gewertet: 0 %.`;
         t += i >= 0 ? ` Platz ${places(res)[i]} von ${res.length}.` : res.length ? ' Ihr Entwurf kam nicht rechtzeitig an und wird nicht gewertet.' : '';
       }
@@ -1596,12 +1617,41 @@
     return out;
   }
   const lockedMsg = () => { $('verdict').innerHTML = '<p>Diese Kachel ist gesperrt: Hier sitzt ein Lager oder greift die Last an.</p>'; };
+  // Ecke: Kachel und Ecke unter dem Zeiger (c: 0 unten links, 1 unten rechts, 2 oben rechts, 3 oben links),
+  // inside: liegt der Punkt im Material der Kachel?
+  function cornerAt(e) {
+    const b = cv.getBoundingClientRect(), fx = (e.clientX - b.left - G.ox) / G.s, fy = (G.oy - e.clientY + b.top) / G.s;
+    const tx = Math.floor(fx), ty = Math.floor(fy), u = fx - tx, v = fy - ty;
+    if (tx < 0 || ty < 0 || tx >= st.L.TX || ty >= st.L.TY) return null;
+    const k = tx + ty * st.L.TX, s = st.solid[k];
+    const inside = s === 1 || (s === 2 && u + v >= 1) || (s === 3 && v >= u) || (s === 4 && u + v <= 1) || (s === 5 && v <= u);
+    return { k, c: v < 0.5 ? (u < 0.5 ? 0 : 1) : (u < 0.5 ? 3 : 2), inside };
+  }
+  // Neuer Zustand nach einem Klick mit „Ecke“: Eine volle Kachel verliert die Ecke. Bei einer halben nimmt ein Klick ins
+  // Material den Rest weg, einer in die freie Ecke macht sie wieder voll. Auf einer leeren entsteht das Dreieck in dieser Ecke.
+  // Bei offenen Karten kommt nichts zurück.
+  function cornerAction(k, c, inside) {
+    const s = st.solid[k];
+    if (s === 1) return c + 2;
+    if (s > 1) return inside ? 0 : st.open ? s : 1;
+    return st.open ? 0 : ((c + 2) % 4) + 2;
+  }
   const pushUndo = () => { st.undo.push(st.solid.slice()); if (st.undo.length > 200) st.undo.shift(); };
 
   cv.addEventListener('pointerdown', e => {
     if (!editable()) return;
     const k = tileAt(e), L = st.L;
     if (k < 0) return;
+    if (st.tool === 'corner') {
+      const h = cornerAt(e);
+      if (!h || !L.domain[k]) return;
+      if (L.frozen[k]) { lockedMsg(); return; }
+      const ns = cornerAction(k, h.c, h.inside);
+      if (ns === st.solid[k]) return;
+      e.preventDefault();
+      pushUndo(); st.solid[k] = ns; st.phase = 'design'; refresh();
+      return;
+    }
     if (st.tool === 'brush' && (!L.domain[k] || L.frozen[k])) { if (L.frozen[k]) lockedMsg(); return; }
     e.preventDefault();
     cv.setPointerCapture(e.pointerId);
@@ -1618,7 +1668,10 @@
       return;
     }
     if (st.paint == null) {
-      if (e.pointerType === 'mouse' && editable()) { const k = tileAt(e); if (k !== st.hover) { st.hover = k; render(); } }
+      if (e.pointerType === 'mouse' && editable()) {
+        const k = tileAt(e), h = st.tool === 'corner' && k >= 0 ? cornerAt(e) : null, c = h ? h.c : -1, inside = !!(h && h.inside);
+        if (k !== st.hover || c !== st.hoverC || inside !== st.hoverIn) { st.hover = k; st.hoverC = c; st.hoverIn = inside; render(); }
+      }
       return;
     }
     // Zwischenpunkte, damit schnelle Striche keine Kacheln überspringen
@@ -1653,9 +1706,11 @@
     st.tool = t;
     $('t-rect').setAttribute('aria-pressed', String(t === 'rect'));
     $('t-brush').setAttribute('aria-pressed', String(t === 'brush'));
+    $('t-corner').setAttribute('aria-pressed', String(t === 'corner'));
   };
   $('t-rect').onclick = () => setTool('rect');
   $('t-brush').onclick = () => setTool('brush');
+  $('t-corner').onclick = () => setTool('corner');
   $('b-submit').onclick = submit;
   $('b-probe').onclick = probe;
   $('b-undo').onclick = undo;

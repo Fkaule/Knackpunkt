@@ -159,10 +159,11 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
       <div id="drawing">
         <div class="sheet-head">
           <p class="howto" id="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
-            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln, etwa für schräge Streben. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            <b>Ecke</b> schneidet die angeklickte Ecke einer Kachel schräg ab, für schlanke schräge Stege; ein Klick auf ein Dreieck nimmt es weg, ein Klick in die freie Ecke macht die Kachel wieder voll.
             Kreuzschraffierte Kacheln sind gesperrt. Beim Abgeben rechnet die FEM: Hält das Bauteil, zählt jedes entfernte Gramm, versagt es, zählt nichts.</p>
           <p class="howto" id="howto-open" hidden><b>Offene Karten:</b> Nach jeder Wegnahme rechnet die FEM und zeigt die Spannungen.
-            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln.
+            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln, <b>Ecke</b> schneidet eine Ecke schräg ab.
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
             <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
@@ -170,6 +171,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
             <button type="button" id="t-rect" aria-pressed="true">Rechteck</button>
             <button type="button" id="t-brush" aria-pressed="false">Pinsel</button>
+            <button type="button" id="t-corner" aria-pressed="false" title="Ecke schräg abschneiden">Ecke</button>
           </div>
           <div class="tools" id="etools" role="group" aria-label="Baukasten" hidden>
             <button type="button" data-t="form" aria-pressed="true">Material</button>
@@ -242,9 +244,10 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <ul>
             <li>Ebener Spannungszustand, Stahl S235: E = 210 GPa, ν = 0,3, Dicke 10 mm.</li>
             <li>Jede Kachel (10 × 10 mm) besteht aus 4 × 4 Viereckelementen mit inkompatiblen Moden. Die Steifigkeitsmatrix wird bei jeder Rechnung neu aufgebaut und gelöst.</li>
+            <li>Halbe Kacheln (abgeschnittene Ecke) bekommen entlang der Schnittkante lineare Dreieckselemente. Bei Masse und Wertung zählen sie halb.</li>
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
-            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält.</li>
+            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
         </details>
@@ -254,6 +257,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Gewertet wird der Mittelwert der Vergleichsspannung über eine Kachel, nicht die Spitze. An scharfen Innenecken wächst die Spitze in einer echten FE-Rechnung mit jeder Netzverfeinerung weiter (Singularität). Beispiel L-Winkel, Innenecke: Spitze im Eckelement 191, 261, 355 und 482 MPa bei 2, 4, 8 und 16 Elementen je Kachelkante, das Kachelmittel bleibt bei 135 MPa.</li>
             <li>Das Netz ist fest, 4 × 4 Elemente je Kachel. Eine Konvergenzstudie macht das Spiel nicht.</li>
             <li>Alle Ecken sind scharf. Echte Bauteile bekommen dort Radien, sonst entscheidet die Kerbe.</li>
+            <li>Lineare Dreiecke an schrägen Kanten sind steifer als die Vierecke, dort rechnet das Spiel etwas zu steif. Eine halbe Kachel mittelt über die halbe Fläche und ist damit etwas strenger.</li>
             <li>„Bruch“ heißt hier: Eine Kachel fließt im Mittel. Das ist kein Bruch im Sinne der Festigkeitslehre und kein Nachweis nach Norm.</li>
             <li>Knicken, Eigengewicht und Ermüdung werden nicht gerechnet. Schlanke Druckstäbe halten im Spiel, die in echt ausknicken würden.</li>
           </ul>

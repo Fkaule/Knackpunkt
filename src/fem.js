@@ -66,16 +66,57 @@ const FEM = (() => {
     return { KE: K, S: s };
   })();
 
+  // Kachelzustände: 0 leer, 1 voll, 2 bis 5 halbe Kachel mit abgeschnittener Ecke unten links, unten rechts, oben rechts, oben links.
+  // Bitmasken je Zustand: Seiten mit Material (1 links, 2 rechts, 4 unten, 8 oben) und Ecken, die zum Material gehören
+  // (1 unten links, 2 unten rechts, 4 oben rechts, 8 oben links); Fläche als Anteil einer Kachel.
+  const SIDES = [0, 15, 10, 9, 5, 6];
+  const CORNERS = [0, 15, 14, 13, 11, 7];
+  const AREA = [0, 1, 0.5, 0.5, 0.5, 0.5];
+  const SIDEBIT = { left: 1, right: 2, bottom: 4, top: 8 };
+  // Rasterquadrat (a, b) einer Kachel, je 0 bis M-1: 0 leer, 1 voll, sonst Dreieck (Typ wie der Zustand)
+  function squareKind(s, a, b) {
+    if (s < 2) return s;
+    const d = s === 3 ? b - a : s === 5 ? a - b : s === 2 ? a + b - (M - 1) : (M - 1) - a - b;
+    return d > 0 ? 1 : d === 0 ? s : 0;
+  }
+  // gehört der Rasterknoten (a, b), je 0 bis M, zum Material der Kachel?
+  const inShape = (s, a, b) => s === 1 || (s === 3 && b >= a) || (s === 5 && b <= a) || (s === 2 && a + b >= M) || (s === 4 && a + b <= M);
+
+  // Auf der Schnittkante halber Kacheln: lineare Dreieckselemente (konstante Dehnung), je Typ die Knoten im Rasterquadrat
+  // gegen den Uhrzeigersinn. Elementsteifigkeit TK (6x6) und Spannungsmatrix TS (3x6).
+  const TRI = { 2: [[1, 0], [1, 1], [0, 1]], 3: [[0, 0], [1, 1], [0, 1]], 4: [[0, 0], [1, 0], [0, 1]], 5: [[0, 0], [1, 0], [1, 1]] };
+  const TK = {}, TS = {};
+  (() => {
+    const c = E / (1 - NU * NU), D = [c, c * NU, 0, c * NU, c, 0, 0, 0, c * (1 - NU) / 2];
+    for (const t in TRI) {
+      const [[x1, y1], [x2, y2], [x3, y3]] = TRI[t].map(([a, b]) => [a * H, b * H]);
+      const A2 = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1);   // doppelte Fläche
+      const bb = [y2 - y3, y3 - y1, y1 - y2], cc = [x3 - x2, x1 - x3, x2 - x1];
+      const B = new Float64Array(18);
+      for (let n = 0; n < 3; n++) {
+        B[2 * n] = bb[n] / A2; B[6 + 2 * n + 1] = cc[n] / A2; B[12 + 2 * n] = cc[n] / A2; B[12 + 2 * n + 1] = bb[n] / A2;
+      }
+      const s = new Float64Array(18), K = new Float64Array(36), w = THICK * A2 / 2;
+      for (let i = 0; i < 3; i++) for (let a = 0; a < 6; a++) for (let j = 0; j < 3; j++) s[i * 6 + a] += D[i * 3 + j] * B[j * 6 + a];
+      for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) {
+        let v = 0;
+        for (let i = 0; i < 3; i++) v += B[i * 6 + a] * s[i * 6 + b];
+        K[a * 6 + b] = w * v;
+      }
+      TK[t] = K; TS[t] = s;
+    }
+  })();
+
   // Level aufbereiten: Lager und Lasten als Knotenwerte, gesperrte Kacheln
   function level(def) {
     const TX = def.tx, TY = def.ty, nx = TX * M, ny = TY * M, nT = TX * TY;
     const domain = new Uint8Array(nT).fill(1);
     for (const [tx, ty] of def.cut || []) domain[tx + ty * TX] = 0;
-    const frozen = new Uint8Array(nT), supportTiles = [], loadTiles = [];
+    const frozen = new Uint8Array(nT), supportTiles = [], supportSides = new Uint8Array(nT), loadTiles = [];
     // Knotennummerierung entlang der kurzen Seite hält die Bandbreite klein
     const base = nx >= ny ? (i, j) => i * (ny + 1) + j : (i, j) => j * (nx + 1) + i;
     const nBase = (nx + 1) * (ny + 1);
-    const fix = new Uint8Array(nBase), fx = new Float64Array(nBase), fy = new Float64Array(nBase);
+    const fix = new Uint8Array(nBase), fx = new Float64Array(nBase), fy = new Float64Array(nBase), loadNodes = new Map();
     const edge = (tx, ty, side) => {
       const out = [];
       for (let k = 0; k <= M; k++) {
@@ -88,6 +129,7 @@ const FEM = (() => {
     };
     for (const s of def.supports) for (const [tx, ty] of s.tiles) {
       supportTiles.push(tx + ty * TX);
+      supportSides[tx + ty * TX] |= SIDEBIT[s.side];
       if (s.lock) frozen[tx + ty * TX] = 1;
       for (const [i, j] of edge(tx, ty, s.side)) fix[base(i, j)] |= s.fix;
     }
@@ -100,26 +142,32 @@ const FEM = (() => {
         for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) {
           fx[base(i, j)] += l.fx / n / 2;
           fy[base(i, j)] += l.fy / n / 2;
+          loadNodes.set(base(i, j), [i, j, tx, ty]);   // Knoten und eine Lastkachel, zu der er gehört
         }
       }
     }
-    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, loadTiles, base, nBase, fix, fx, fy };
+    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, fix, fx, fy, loadNodes };
   }
 
-  // Kacheln, die über Kanten mit den Startkacheln verbunden sind (Eckkontakt zählt nicht)
+  // Kacheln, die über Kanten mit den Startkacheln verbunden sind. Verbunden heißt: beide Kacheln haben auf der
+  // gemeinsamen Kante Material. Eckkontakt zählt nicht.
   function connect(L, solid, seeds) {
     const seen = new Uint8Array(L.nT), stack = [];
     for (const k of seeds) if (solid[k] && !seen[k]) { seen[k] = 1; stack.push(k); }
     while (stack.length) {
-      const k = stack.pop(), tx = k % L.TX, ty = (k - tx) / L.TX;
-      for (const [x, y] of [[tx + 1, ty], [tx - 1, ty], [tx, ty + 1], [tx, ty - 1]]) {
-        if (x < 0 || y < 0 || x >= L.TX || y >= L.TY) continue;
+      const k = stack.pop(), tx = k % L.TX, ty = (k - tx) / L.TX, sk = SIDES[solid[k]];
+      for (const [x, y, mine, theirs] of [[tx + 1, ty, 2, 1], [tx - 1, ty, 1, 2], [tx, ty + 1, 8, 4], [tx, ty - 1, 4, 8]]) {
+        if (x < 0 || y < 0 || x >= L.TX || y >= L.TY || !(sk & mine)) continue;
         const q = x + y * L.TX;
-        if (solid[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+        if (solid[q] && !seen[q] && (SIDES[solid[q]] & theirs)) { seen[q] = 1; stack.push(q); }
       }
     }
     return seen;
   }
+  // Was am Lager hängt; eine Lagerkachel zählt nur mit Material auf der gelagerten Seite
+  const attached = (L, solid) => connect(L, solid, L.supportTiles.filter(k => SIDES[solid[k]] & L.supportSides[k]));
+  // Fläche in Kacheln: halbe Kacheln zählen halb
+  const area = (solid, set) => solid.reduce((a, s, k) => a + (set[k] ? AREA[s] : 0), 0);
 
   let band = new Float64Array(0);
 
@@ -127,59 +175,66 @@ const FEM = (() => {
     const t0 = performance.now();
     const { TX, TY, nx, ny, nT } = L;
     // conn: hängt an einem Lager (fällt nicht ab); fe: trägt die Last, nur das wird gerechnet
-    const conn = connect(L, solid, L.supportTiles);
-    const res = { ok: false, reason: '', conn, tileUtil: new Float32Array(nT), maxUtil: 0, maxTile: -1,
+    const conn = attached(L, solid);
+    const res = { ok: false, reason: '', conn, solid: Uint8Array.from(solid), area: area(solid, conn), tileUtil: new Float32Array(nT), maxUtil: 0, maxTile: -1,
       disp: null, dofs: 0, elements: 0, ms: 0 };
     if (!L.loadTiles.every(k => conn[k])) { res.reason = 'lastpfad'; return res; }
     const fe = connect(L, solid, L.loadTiles);
     res.fe = fe;
+    const sf = k => fe[k] ? solid[k] : 0;
 
-    // Ecken, an denen sich nur zwei diagonale Kacheln berühren, bekommen getrennte Knoten
-    const split = new Uint8Array((TX + 1) * (TY + 1));
-    for (let cy = 1; cy < TY; cy++) for (let cx = 1; cx < TX; cx++) {
-      const sw = fe[cx - 1 + (cy - 1) * TX], se = fe[cx + (cy - 1) * TX];
-      const nw = fe[cx - 1 + cy * TX], ne = fe[cx + cy * TX];
-      if (sw && ne && !se && !nw) split[cx + cy * (TX + 1)] = 1;        // NE eigener Knoten
-      else if (se && nw && !sw && !ne) split[cx + cy * (TX + 1)] = 2;   // NW eigener Knoten
-    }
-
-    const nEl = nx * ny, key = new Int32Array(nEl * 4), active = new Uint8Array(L.nBase * 2);
-    const els = [];
-    const CI = [0, 1, 1, 0], CJ = [0, 0, 1, 1];
-    for (let ey = 0; ey < ny; ey++) for (let ex = 0; ex < nx; ex++) {
-      if (!fe[((ex / M) | 0) + ((ey / M) | 0) * TX]) continue;
-      const e = ex + ey * nx;
-      els.push(e);
-      for (let c = 0; c < 4; c++) {
-        const i = ex + CI[c], j = ey + CJ[c];
-        let dup = 0;
-        if (i % M === 0 && j % M === 0) {
-          const s = split[i / M + (j / M) * (TX + 1)];
-          if ((s === 1 && c === 0) || (s === 2 && c === 1)) dup = 1;
-        }
-        const k = L.base(i, j) * 2 + dup;
-        key[e * 4 + c] = k;
-        active[k] = 1;
+    // An jeder Kachelecke bekommt jede Gruppe von Kacheln, die dort über Kanten zusammenhängt, einen eigenen Knoten:
+    // Was sich nur in einem Punkt berührt, gilt als getrennt. Lage der Kachel zur Ecke: 0 links unten, 1 rechts unten,
+    // 2 links oben, 3 rechts oben.
+    const copy = new Uint8Array((TX + 1) * (TY + 1) * 4);
+    for (let cy = 0; cy <= TY; cy++) for (let cx = 0; cx <= TX; cx++) {
+      const s = [[cx - 1, cy - 1, 4], [cx, cy - 1, 8], [cx - 1, cy, 2], [cx, cy, 1]].map(([x, y, bit]) =>
+        x >= 0 && y >= 0 && x < TX && y < TY && (CORNERS[sf(x + y * TX)] & bit) ? sf(x + y * TX) : 0);
+      if (s.filter(Boolean).length < 2) continue;
+      const par = [0, 1, 2, 3], find = i => par[i] === i ? i : (par[i] = find(par[i]));
+      const link = (a, b, sa, sb) => { if (s[a] && s[b] && (SIDES[s[a]] & sa) && (SIDES[s[b]] & sb)) par[find(a)] = find(b); };
+      link(0, 1, 2, 1); link(2, 3, 2, 1); link(0, 2, 8, 4); link(1, 3, 8, 4);
+      const ids = {};
+      let next = 0;
+      for (let p = 0; p < 4; p++) if (s[p]) {
+        const root = find(p);
+        if (!(root in ids)) ids[root] = next++;
+        copy[(cx + cy * (TX + 1)) * 4 + p] = ids[root];
       }
     }
+    // Schlüssel eines Rasterknotens (i, j) aus Sicht der Kachel (tx, ty): an Kachelecken die Kopie ihrer Gruppe
+    const nodeKey = (tx, ty, i, j) => {
+      const a = i - tx * M, b = j - ty * M;
+      if ((a === 0 || a === M) && (b === 0 || b === M))
+        return L.base(i, j) * 4 + copy[(tx + a / M + (ty + b / M) * (TX + 1)) * 4 + (a ? 0 : 1) + (b ? 0 : 2)];
+      return L.base(i, j) * 4;
+    };
 
-    const eq = new Int32Array(L.nBase * 4).fill(-1);
+    // Elemente: volle Rasterquadrate als Vierecke, die auf der Schnittkante als Dreiecke
+    const CI = [0, 1, 1, 0], CJ = [0, 0, 1, 1];
+    const quads = [], tris = [], active = new Uint8Array(L.nBase * 4);
+    for (let ey = 0; ey < ny; ey++) for (let ex = 0; ex < nx; ex++) {
+      const tx = (ex / M) | 0, ty = (ey / M) | 0, kind = squareKind(sf(tx + ty * TX), ex - tx * M, ey - ty * M);
+      if (!kind) continue;
+      const pts = kind === 1 ? CI.map((ci, c) => [ex + ci, ey + CJ[c]]) : TRI[kind].map(([a, b]) => [ex + a, ey + b]);
+      const keys = pts.map(([i, j]) => nodeKey(tx, ty, i, j));
+      keys.forEach(k => { active[k] = 1; });
+      (kind === 1 ? quads : tris).push({ k: tx + ty * TX, kind, pts, keys });
+    }
+
+    const eq = new Int32Array(L.nBase * 8).fill(-1);
     let n = 0;
-    for (let k = 0; k < L.nBase * 2; k++) if (active[k]) {
-      const f = L.fix[k >> 1];
+    for (let k = 0; k < L.nBase * 4; k++) if (active[k]) {
+      const f = L.fix[k >> 2];
       if (!(f & 1)) eq[2 * k] = n++;
       if (!(f & 2)) eq[2 * k + 1] = n++;
     }
 
-    const edof = new Int32Array(nEl * 8);
     let bw = 0;
-    for (const e of els) {
+    for (const el of [...quads, ...tris]) {
       let lo = Infinity, hi = -1;
-      for (let c = 0; c < 4; c++) for (let d = 0; d < 2; d++) {
-        const q = eq[2 * key[e * 4 + c] + d];
-        edof[e * 8 + 2 * c + d] = q;
-        if (q >= 0) { lo = Math.min(lo, q); hi = Math.max(hi, q); }
-      }
+      el.dof = el.keys.flatMap(k => [eq[2 * k], eq[2 * k + 1]]);
+      for (const q of el.dof) if (q >= 0) { lo = Math.min(lo, q); hi = Math.max(hi, q); }
       if (hi >= 0) bw = Math.max(bw, hi - lo);
     }
 
@@ -188,19 +243,22 @@ const FEM = (() => {
     if (band.length < n * w) band = new Float64Array(n * w);
     const A = band;
     A.fill(0, 0, n * w);
-    for (const e of els) for (let a = 0; a < 8; a++) {
-      const p = edof[e * 8 + a];
-      if (p < 0) continue;
-      for (let b = 0; b < 8; b++) {
-        const q = edof[e * 8 + b];
-        if (q >= p) A[p * w + q - p] += KE[a * 8 + b];
+    for (const el of [...quads, ...tris]) {
+      const K = el.kind === 1 ? KE : TK[el.kind], m = el.dof.length;
+      for (let a = 0; a < m; a++) {
+        const p = el.dof[a];
+        if (p < 0) continue;
+        for (let b = 0; b < m; b++) {
+          const q = el.dof[b];
+          if (q >= p) A[p * w + q - p] += K[a * m + b];
+        }
       }
     }
     const x = new Float64Array(n);
-    for (let k = 0; k < L.nBase; k++) if (L.fx[k] || L.fy[k]) {
-      const p = eq[4 * k], q = eq[4 * k + 1];
-      if (p >= 0) x[p] += L.fx[k];
-      if (q >= 0) x[q] += L.fy[k];
+    for (const [bi, [i, j, tx, ty]] of L.loadNodes) {
+      const key = nodeKey(tx, ty, i, j), p = eq[2 * key], q = eq[2 * key + 1];
+      if (p >= 0) x[p] += L.fx[bi];
+      if (q >= 0) x[q] += L.fy[bi];
     }
 
     // Cholesky A = U^T U (in place), dann Vorwärts- und Rückwärtseinsetzen.
@@ -230,21 +288,24 @@ const FEM = (() => {
       x[i] = s / A[r];
     }
 
-    // Vergleichsspannung (von Mises) je Element, Mittelwert je Kachel
-    const disp = new Float32Array(nEl * 8), sum = new Float64Array(nT), u = new Float64Array(8);
-    for (const e of els) {
-      for (let a = 0; a < 8; a++) {
-        const p = edof[e * 8 + a];
-        u[a] = p >= 0 ? x[p] : 0;
-        disp[e * 8 + a] = u[a];
-      }
+    // Vergleichsspannung (von Mises) je Element, flächengewichteter Mittelwert je Kachel (Dreieck zählt halb).
+    // disp: Verschiebung je Kachel und Rasterknoten (M+1 mal M+1) fürs Zeichnen.
+    const R = M + 1, disp = new Float32Array(nT * R * R * 2), sum = new Float64Array(nT), wsum = new Float64Array(nT);
+    for (const el of [...quads, ...tris]) {
+      const u = el.dof.map(p => p >= 0 ? x[p] : 0), Sm = el.kind === 1 ? S : TS[el.kind], m = u.length;
       let sx = 0, sy = 0, t = 0;
-      for (let a = 0; a < 8; a++) { sx += S[a] * u[a]; sy += S[8 + a] * u[a]; t += S[16 + a] * u[a]; }
-      const ex = e % nx, ey = (e - ex) / nx;
-      sum[((ex / M) | 0) + ((ey / M) | 0) * TX] += Math.sqrt(sx * sx - sx * sy + sy * sy + 3 * t * t);
+      for (let a = 0; a < m; a++) { sx += Sm[a] * u[a]; sy += Sm[m + a] * u[a]; t += Sm[2 * m + a] * u[a]; }
+      const wt = el.kind === 1 ? 1 : 0.5;
+      sum[el.k] += wt * Math.sqrt(sx * sx - sx * sy + sy * sy + 3 * t * t);
+      wsum[el.k] += wt;
+      const tx = el.k % TX, ty = (el.k - tx) / TX;
+      el.pts.forEach(([i, j], c) => {
+        const o = (el.k * R * R + (j - ty * M) * R + (i - tx * M)) * 2;
+        disp[o] = u[2 * c]; disp[o + 1] = u[2 * c + 1];
+      });
     }
-    for (let k = 0; k < nT; k++) if (fe[k]) {
-      const util = sum[k] / (M * M) / RE;
+    for (let k = 0; k < nT; k++) if (fe[k] && wsum[k]) {
+      const util = sum[k] / wsum[k] / RE;
       res.tileUtil[k] = util;
       if (util > res.maxUtil) { res.maxUtil = util; res.maxTile = k; }
     }
@@ -252,34 +313,49 @@ const FEM = (() => {
     res.reason = res.ok ? '' : 'spannung';
     res.disp = disp;
     res.dofs = n;
-    res.elements = els.length;
+    res.elements = quads.length + tris.length;
     res.ms = performance.now() - t0;
     return res;
   }
 
-  // ESO: immer die am geringsten ausgelastete Kachel entfernen, die sich entfernen lässt,
-  // bis keine mehr geht. Generator, damit die Oberfläche zwischen den Rechnungen atmen kann.
+  // Freie Ecken einer vollen Kachel: beide angrenzenden Seiten ohne Material gegenüber (Rand oder Nachbar ohne Material dort)
+  function freeCorners(L, solid, conn, k) {
+    const tx = k % L.TX, ty = (k - tx) / L.TX;
+    const open = (x, y, side) => x < 0 || y < 0 || x >= L.TX || y >= L.TY || !conn[x + y * L.TX] || !(SIDES[solid[x + y * L.TX]] & side);
+    const l = open(tx - 1, ty, 2), r = open(tx + 1, ty, 1), b = open(tx, ty - 1, 8), t = open(tx, ty + 1, 4);
+    // abzuschneidende Ecke als neuer Zustand: unten links 2, unten rechts 3, oben rechts 4, oben links 5
+    return [l && b && 2, r && b && 3, r && t && 4, l && t && 5].filter(Boolean);
+  }
+
+  // ESO: immer die am geringsten ausgelastete Kachel entfernen, die sich entfernen lässt, bis keine mehr geht.
+  // Danach glätten: freie Ecken abschneiden und halbe Kacheln ganz entfernen, solange es hält.
+  // Generator, damit die Oberfläche zwischen den Rechnungen atmen kann.
   function* eso(L) {
-    let r = analyze(L, L.domain);
-    const order = [];
-    for (;;) {
+    let solid = L.domain.slice(), r = analyze(L, solid);
+    const order = [], cuts = [];
+    const masked = () => Uint8Array.from(solid, (s, k) => r.conn[k] ? s : 0);   // nur, was noch am Lager hängt
+    for (let phase = 0; phase < 2; phase++) for (;;) {
       const cand = [];
-      for (let k = 0; k < L.nT; k++) if (r.conn[k] && !L.frozen[k]) cand.push(k);
-      cand.sort((a, b) => r.tileUtil[a] - r.tileUtil[b]);
+      for (let k = 0; k < L.nT; k++) if (r.conn[k] && !L.frozen[k]) {
+        if (!phase) cand.push([k, 0]);
+        else if (solid[k] === 1) for (const s of freeCorners(L, solid, r.conn, k)) cand.push([k, s]);
+        else cand.push([k, 0]);
+      }
+      cand.sort((a, b) => r.tileUtil[a[0]] - r.tileUtil[b[0]]);
       let next = null;
-      for (const k of cand) {
-        const trial = r.conn.slice();
-        trial[k] = 0;
+      for (const [k, s] of cand) {
+        const trial = masked();
+        trial[k] = s;
         const t = analyze(L, trial);
-        yield order.length;
-        if (t.ok) { next = t; order.push(k); break; }
+        yield order.length + cuts.length;
+        if (t.ok) { next = t; solid = trial; (phase ? cuts : order).push(k); break; }
       }
       if (!next) break;
       r = next;
     }
-    return { res: r, order };
+    return { res: r, order, cuts, solid: masked() };
   }
 
-  return { M, TILE, THICK, RE, TILE_G, S, level, connect, analyze, eso };
+  return { M, TILE, THICK, RE, TILE_G, S, TRI, TK, TS, SIDES, CORNERS, AREA, squareKind, inShape, level, connect, attached, area, analyze, eso };
 })();
 if (typeof module !== 'undefined') module.exports = FEM;

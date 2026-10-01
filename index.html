@@ -164,10 +164,11 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
       <div id="drawing">
         <div class="sheet-head">
           <p class="howto" id="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
-            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln, etwa für schräge Streben. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            Mit dem <b>Pinsel</b> überstreichen Sie Kacheln. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
+            <b>Ecke</b> schneidet die angeklickte Ecke einer Kachel schräg ab, für schlanke schräge Stege; ein Klick auf ein Dreieck nimmt es weg, ein Klick in die freie Ecke macht die Kachel wieder voll.
             Kreuzschraffierte Kacheln sind gesperrt. Beim Abgeben rechnet die FEM: Hält das Bauteil, zählt jedes entfernte Gramm, versagt es, zählt nichts.</p>
           <p class="howto" id="howto-open" hidden><b>Offene Karten:</b> Nach jeder Wegnahme rechnet die FEM und zeigt die Spannungen.
-            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln.
+            <b>Rechteck aufziehen</b> nimmt viele Kacheln weg, <b>antippen</b> eine einzelne, der <b>Pinsel</b> überstreicht Kacheln, <b>Ecke</b> schneidet eine Ecke schräg ab.
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
             <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
@@ -175,6 +176,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
             <button type="button" id="t-rect" aria-pressed="true">Rechteck</button>
             <button type="button" id="t-brush" aria-pressed="false">Pinsel</button>
+            <button type="button" id="t-corner" aria-pressed="false" title="Ecke schräg abschneiden">Ecke</button>
           </div>
           <div class="tools" id="etools" role="group" aria-label="Baukasten" hidden>
             <button type="button" data-t="form" aria-pressed="true">Material</button>
@@ -247,9 +249,10 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
           <ul>
             <li>Ebener Spannungszustand, Stahl S235: E = 210 GPa, ν = 0,3, Dicke 10 mm.</li>
             <li>Jede Kachel (10 × 10 mm) besteht aus 4 × 4 Viereckelementen mit inkompatiblen Moden. Die Steifigkeitsmatrix wird bei jeder Rechnung neu aufgebaut und gelöst.</li>
+            <li>Halbe Kacheln (abgeschnittene Ecke) bekommen entlang der Schnittkante lineare Dreieckselemente. Bei Masse und Wertung zählen sie halb.</li>
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
-            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält.</li>
+            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
         </details>
@@ -259,6 +262,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Gewertet wird der Mittelwert der Vergleichsspannung über eine Kachel, nicht die Spitze. An scharfen Innenecken wächst die Spitze in einer echten FE-Rechnung mit jeder Netzverfeinerung weiter (Singularität). Beispiel L-Winkel, Innenecke: Spitze im Eckelement 191, 261, 355 und 482 MPa bei 2, 4, 8 und 16 Elementen je Kachelkante, das Kachelmittel bleibt bei 135 MPa.</li>
             <li>Das Netz ist fest, 4 × 4 Elemente je Kachel. Eine Konvergenzstudie macht das Spiel nicht.</li>
             <li>Alle Ecken sind scharf. Echte Bauteile bekommen dort Radien, sonst entscheidet die Kerbe.</li>
+            <li>Lineare Dreiecke an schrägen Kanten sind steifer als die Vierecke, dort rechnet das Spiel etwas zu steif. Eine halbe Kachel mittelt über die halbe Fläche und ist damit etwas strenger.</li>
             <li>„Bruch“ heißt hier: Eine Kachel fließt im Mittel. Das ist kein Bruch im Sinne der Festigkeitslehre und kein Nachweis nach Norm.</li>
             <li>Knicken, Eigengewicht und Ermüdung werden nicht gerechnet. Schlanke Druckstäbe halten im Spiel, die in echt ausknicken würden.</li>
           </ul>
@@ -339,16 +343,57 @@ const FEM = (() => {
     return { KE: K, S: s };
   })();
 
+  // Kachelzustände: 0 leer, 1 voll, 2 bis 5 halbe Kachel mit abgeschnittener Ecke unten links, unten rechts, oben rechts, oben links.
+  // Bitmasken je Zustand: Seiten mit Material (1 links, 2 rechts, 4 unten, 8 oben) und Ecken, die zum Material gehören
+  // (1 unten links, 2 unten rechts, 4 oben rechts, 8 oben links); Fläche als Anteil einer Kachel.
+  const SIDES = [0, 15, 10, 9, 5, 6];
+  const CORNERS = [0, 15, 14, 13, 11, 7];
+  const AREA = [0, 1, 0.5, 0.5, 0.5, 0.5];
+  const SIDEBIT = { left: 1, right: 2, bottom: 4, top: 8 };
+  // Rasterquadrat (a, b) einer Kachel, je 0 bis M-1: 0 leer, 1 voll, sonst Dreieck (Typ wie der Zustand)
+  function squareKind(s, a, b) {
+    if (s < 2) return s;
+    const d = s === 3 ? b - a : s === 5 ? a - b : s === 2 ? a + b - (M - 1) : (M - 1) - a - b;
+    return d > 0 ? 1 : d === 0 ? s : 0;
+  }
+  // gehört der Rasterknoten (a, b), je 0 bis M, zum Material der Kachel?
+  const inShape = (s, a, b) => s === 1 || (s === 3 && b >= a) || (s === 5 && b <= a) || (s === 2 && a + b >= M) || (s === 4 && a + b <= M);
+
+  // Auf der Schnittkante halber Kacheln: lineare Dreieckselemente (konstante Dehnung), je Typ die Knoten im Rasterquadrat
+  // gegen den Uhrzeigersinn. Elementsteifigkeit TK (6x6) und Spannungsmatrix TS (3x6).
+  const TRI = { 2: [[1, 0], [1, 1], [0, 1]], 3: [[0, 0], [1, 1], [0, 1]], 4: [[0, 0], [1, 0], [0, 1]], 5: [[0, 0], [1, 0], [1, 1]] };
+  const TK = {}, TS = {};
+  (() => {
+    const c = E / (1 - NU * NU), D = [c, c * NU, 0, c * NU, c, 0, 0, 0, c * (1 - NU) / 2];
+    for (const t in TRI) {
+      const [[x1, y1], [x2, y2], [x3, y3]] = TRI[t].map(([a, b]) => [a * H, b * H]);
+      const A2 = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1);   // doppelte Fläche
+      const bb = [y2 - y3, y3 - y1, y1 - y2], cc = [x3 - x2, x1 - x3, x2 - x1];
+      const B = new Float64Array(18);
+      for (let n = 0; n < 3; n++) {
+        B[2 * n] = bb[n] / A2; B[6 + 2 * n + 1] = cc[n] / A2; B[12 + 2 * n] = cc[n] / A2; B[12 + 2 * n + 1] = bb[n] / A2;
+      }
+      const s = new Float64Array(18), K = new Float64Array(36), w = THICK * A2 / 2;
+      for (let i = 0; i < 3; i++) for (let a = 0; a < 6; a++) for (let j = 0; j < 3; j++) s[i * 6 + a] += D[i * 3 + j] * B[j * 6 + a];
+      for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) {
+        let v = 0;
+        for (let i = 0; i < 3; i++) v += B[i * 6 + a] * s[i * 6 + b];
+        K[a * 6 + b] = w * v;
+      }
+      TK[t] = K; TS[t] = s;
+    }
+  })();
+
   // Level aufbereiten: Lager und Lasten als Knotenwerte, gesperrte Kacheln
   function level(def) {
     const TX = def.tx, TY = def.ty, nx = TX * M, ny = TY * M, nT = TX * TY;
     const domain = new Uint8Array(nT).fill(1);
     for (const [tx, ty] of def.cut || []) domain[tx + ty * TX] = 0;
-    const frozen = new Uint8Array(nT), supportTiles = [], loadTiles = [];
+    const frozen = new Uint8Array(nT), supportTiles = [], supportSides = new Uint8Array(nT), loadTiles = [];
     // Knotennummerierung entlang der kurzen Seite hält die Bandbreite klein
     const base = nx >= ny ? (i, j) => i * (ny + 1) + j : (i, j) => j * (nx + 1) + i;
     const nBase = (nx + 1) * (ny + 1);
-    const fix = new Uint8Array(nBase), fx = new Float64Array(nBase), fy = new Float64Array(nBase);
+    const fix = new Uint8Array(nBase), fx = new Float64Array(nBase), fy = new Float64Array(nBase), loadNodes = new Map();
     const edge = (tx, ty, side) => {
       const out = [];
       for (let k = 0; k <= M; k++) {
@@ -361,6 +406,7 @@ const FEM = (() => {
     };
     for (const s of def.supports) for (const [tx, ty] of s.tiles) {
       supportTiles.push(tx + ty * TX);
+      supportSides[tx + ty * TX] |= SIDEBIT[s.side];
       if (s.lock) frozen[tx + ty * TX] = 1;
       for (const [i, j] of edge(tx, ty, s.side)) fix[base(i, j)] |= s.fix;
     }
@@ -373,26 +419,32 @@ const FEM = (() => {
         for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) {
           fx[base(i, j)] += l.fx / n / 2;
           fy[base(i, j)] += l.fy / n / 2;
+          loadNodes.set(base(i, j), [i, j, tx, ty]);   // Knoten und eine Lastkachel, zu der er gehört
         }
       }
     }
-    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, loadTiles, base, nBase, fix, fx, fy };
+    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, fix, fx, fy, loadNodes };
   }
 
-  // Kacheln, die über Kanten mit den Startkacheln verbunden sind (Eckkontakt zählt nicht)
+  // Kacheln, die über Kanten mit den Startkacheln verbunden sind. Verbunden heißt: beide Kacheln haben auf der
+  // gemeinsamen Kante Material. Eckkontakt zählt nicht.
   function connect(L, solid, seeds) {
     const seen = new Uint8Array(L.nT), stack = [];
     for (const k of seeds) if (solid[k] && !seen[k]) { seen[k] = 1; stack.push(k); }
     while (stack.length) {
-      const k = stack.pop(), tx = k % L.TX, ty = (k - tx) / L.TX;
-      for (const [x, y] of [[tx + 1, ty], [tx - 1, ty], [tx, ty + 1], [tx, ty - 1]]) {
-        if (x < 0 || y < 0 || x >= L.TX || y >= L.TY) continue;
+      const k = stack.pop(), tx = k % L.TX, ty = (k - tx) / L.TX, sk = SIDES[solid[k]];
+      for (const [x, y, mine, theirs] of [[tx + 1, ty, 2, 1], [tx - 1, ty, 1, 2], [tx, ty + 1, 8, 4], [tx, ty - 1, 4, 8]]) {
+        if (x < 0 || y < 0 || x >= L.TX || y >= L.TY || !(sk & mine)) continue;
         const q = x + y * L.TX;
-        if (solid[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+        if (solid[q] && !seen[q] && (SIDES[solid[q]] & theirs)) { seen[q] = 1; stack.push(q); }
       }
     }
     return seen;
   }
+  // Was am Lager hängt; eine Lagerkachel zählt nur mit Material auf der gelagerten Seite
+  const attached = (L, solid) => connect(L, solid, L.supportTiles.filter(k => SIDES[solid[k]] & L.supportSides[k]));
+  // Fläche in Kacheln: halbe Kacheln zählen halb
+  const area = (solid, set) => solid.reduce((a, s, k) => a + (set[k] ? AREA[s] : 0), 0);
 
   let band = new Float64Array(0);
 
@@ -400,59 +452,66 @@ const FEM = (() => {
     const t0 = performance.now();
     const { TX, TY, nx, ny, nT } = L;
     // conn: hängt an einem Lager (fällt nicht ab); fe: trägt die Last, nur das wird gerechnet
-    const conn = connect(L, solid, L.supportTiles);
-    const res = { ok: false, reason: '', conn, tileUtil: new Float32Array(nT), maxUtil: 0, maxTile: -1,
+    const conn = attached(L, solid);
+    const res = { ok: false, reason: '', conn, solid: Uint8Array.from(solid), area: area(solid, conn), tileUtil: new Float32Array(nT), maxUtil: 0, maxTile: -1,
       disp: null, dofs: 0, elements: 0, ms: 0 };
     if (!L.loadTiles.every(k => conn[k])) { res.reason = 'lastpfad'; return res; }
     const fe = connect(L, solid, L.loadTiles);
     res.fe = fe;
+    const sf = k => fe[k] ? solid[k] : 0;
 
-    // Ecken, an denen sich nur zwei diagonale Kacheln berühren, bekommen getrennte Knoten
-    const split = new Uint8Array((TX + 1) * (TY + 1));
-    for (let cy = 1; cy < TY; cy++) for (let cx = 1; cx < TX; cx++) {
-      const sw = fe[cx - 1 + (cy - 1) * TX], se = fe[cx + (cy - 1) * TX];
-      const nw = fe[cx - 1 + cy * TX], ne = fe[cx + cy * TX];
-      if (sw && ne && !se && !nw) split[cx + cy * (TX + 1)] = 1;        // NE eigener Knoten
-      else if (se && nw && !sw && !ne) split[cx + cy * (TX + 1)] = 2;   // NW eigener Knoten
-    }
-
-    const nEl = nx * ny, key = new Int32Array(nEl * 4), active = new Uint8Array(L.nBase * 2);
-    const els = [];
-    const CI = [0, 1, 1, 0], CJ = [0, 0, 1, 1];
-    for (let ey = 0; ey < ny; ey++) for (let ex = 0; ex < nx; ex++) {
-      if (!fe[((ex / M) | 0) + ((ey / M) | 0) * TX]) continue;
-      const e = ex + ey * nx;
-      els.push(e);
-      for (let c = 0; c < 4; c++) {
-        const i = ex + CI[c], j = ey + CJ[c];
-        let dup = 0;
-        if (i % M === 0 && j % M === 0) {
-          const s = split[i / M + (j / M) * (TX + 1)];
-          if ((s === 1 && c === 0) || (s === 2 && c === 1)) dup = 1;
-        }
-        const k = L.base(i, j) * 2 + dup;
-        key[e * 4 + c] = k;
-        active[k] = 1;
+    // An jeder Kachelecke bekommt jede Gruppe von Kacheln, die dort über Kanten zusammenhängt, einen eigenen Knoten:
+    // Was sich nur in einem Punkt berührt, gilt als getrennt. Lage der Kachel zur Ecke: 0 links unten, 1 rechts unten,
+    // 2 links oben, 3 rechts oben.
+    const copy = new Uint8Array((TX + 1) * (TY + 1) * 4);
+    for (let cy = 0; cy <= TY; cy++) for (let cx = 0; cx <= TX; cx++) {
+      const s = [[cx - 1, cy - 1, 4], [cx, cy - 1, 8], [cx - 1, cy, 2], [cx, cy, 1]].map(([x, y, bit]) =>
+        x >= 0 && y >= 0 && x < TX && y < TY && (CORNERS[sf(x + y * TX)] & bit) ? sf(x + y * TX) : 0);
+      if (s.filter(Boolean).length < 2) continue;
+      const par = [0, 1, 2, 3], find = i => par[i] === i ? i : (par[i] = find(par[i]));
+      const link = (a, b, sa, sb) => { if (s[a] && s[b] && (SIDES[s[a]] & sa) && (SIDES[s[b]] & sb)) par[find(a)] = find(b); };
+      link(0, 1, 2, 1); link(2, 3, 2, 1); link(0, 2, 8, 4); link(1, 3, 8, 4);
+      const ids = {};
+      let next = 0;
+      for (let p = 0; p < 4; p++) if (s[p]) {
+        const root = find(p);
+        if (!(root in ids)) ids[root] = next++;
+        copy[(cx + cy * (TX + 1)) * 4 + p] = ids[root];
       }
     }
+    // Schlüssel eines Rasterknotens (i, j) aus Sicht der Kachel (tx, ty): an Kachelecken die Kopie ihrer Gruppe
+    const nodeKey = (tx, ty, i, j) => {
+      const a = i - tx * M, b = j - ty * M;
+      if ((a === 0 || a === M) && (b === 0 || b === M))
+        return L.base(i, j) * 4 + copy[(tx + a / M + (ty + b / M) * (TX + 1)) * 4 + (a ? 0 : 1) + (b ? 0 : 2)];
+      return L.base(i, j) * 4;
+    };
 
-    const eq = new Int32Array(L.nBase * 4).fill(-1);
+    // Elemente: volle Rasterquadrate als Vierecke, die auf der Schnittkante als Dreiecke
+    const CI = [0, 1, 1, 0], CJ = [0, 0, 1, 1];
+    const quads = [], tris = [], active = new Uint8Array(L.nBase * 4);
+    for (let ey = 0; ey < ny; ey++) for (let ex = 0; ex < nx; ex++) {
+      const tx = (ex / M) | 0, ty = (ey / M) | 0, kind = squareKind(sf(tx + ty * TX), ex - tx * M, ey - ty * M);
+      if (!kind) continue;
+      const pts = kind === 1 ? CI.map((ci, c) => [ex + ci, ey + CJ[c]]) : TRI[kind].map(([a, b]) => [ex + a, ey + b]);
+      const keys = pts.map(([i, j]) => nodeKey(tx, ty, i, j));
+      keys.forEach(k => { active[k] = 1; });
+      (kind === 1 ? quads : tris).push({ k: tx + ty * TX, kind, pts, keys });
+    }
+
+    const eq = new Int32Array(L.nBase * 8).fill(-1);
     let n = 0;
-    for (let k = 0; k < L.nBase * 2; k++) if (active[k]) {
-      const f = L.fix[k >> 1];
+    for (let k = 0; k < L.nBase * 4; k++) if (active[k]) {
+      const f = L.fix[k >> 2];
       if (!(f & 1)) eq[2 * k] = n++;
       if (!(f & 2)) eq[2 * k + 1] = n++;
     }
 
-    const edof = new Int32Array(nEl * 8);
     let bw = 0;
-    for (const e of els) {
+    for (const el of [...quads, ...tris]) {
       let lo = Infinity, hi = -1;
-      for (let c = 0; c < 4; c++) for (let d = 0; d < 2; d++) {
-        const q = eq[2 * key[e * 4 + c] + d];
-        edof[e * 8 + 2 * c + d] = q;
-        if (q >= 0) { lo = Math.min(lo, q); hi = Math.max(hi, q); }
-      }
+      el.dof = el.keys.flatMap(k => [eq[2 * k], eq[2 * k + 1]]);
+      for (const q of el.dof) if (q >= 0) { lo = Math.min(lo, q); hi = Math.max(hi, q); }
       if (hi >= 0) bw = Math.max(bw, hi - lo);
     }
 
@@ -461,19 +520,22 @@ const FEM = (() => {
     if (band.length < n * w) band = new Float64Array(n * w);
     const A = band;
     A.fill(0, 0, n * w);
-    for (const e of els) for (let a = 0; a < 8; a++) {
-      const p = edof[e * 8 + a];
-      if (p < 0) continue;
-      for (let b = 0; b < 8; b++) {
-        const q = edof[e * 8 + b];
-        if (q >= p) A[p * w + q - p] += KE[a * 8 + b];
+    for (const el of [...quads, ...tris]) {
+      const K = el.kind === 1 ? KE : TK[el.kind], m = el.dof.length;
+      for (let a = 0; a < m; a++) {
+        const p = el.dof[a];
+        if (p < 0) continue;
+        for (let b = 0; b < m; b++) {
+          const q = el.dof[b];
+          if (q >= p) A[p * w + q - p] += K[a * m + b];
+        }
       }
     }
     const x = new Float64Array(n);
-    for (let k = 0; k < L.nBase; k++) if (L.fx[k] || L.fy[k]) {
-      const p = eq[4 * k], q = eq[4 * k + 1];
-      if (p >= 0) x[p] += L.fx[k];
-      if (q >= 0) x[q] += L.fy[k];
+    for (const [bi, [i, j, tx, ty]] of L.loadNodes) {
+      const key = nodeKey(tx, ty, i, j), p = eq[2 * key], q = eq[2 * key + 1];
+      if (p >= 0) x[p] += L.fx[bi];
+      if (q >= 0) x[q] += L.fy[bi];
     }
 
     // Cholesky A = U^T U (in place), dann Vorwärts- und Rückwärtseinsetzen.
@@ -503,21 +565,24 @@ const FEM = (() => {
       x[i] = s / A[r];
     }
 
-    // Vergleichsspannung (von Mises) je Element, Mittelwert je Kachel
-    const disp = new Float32Array(nEl * 8), sum = new Float64Array(nT), u = new Float64Array(8);
-    for (const e of els) {
-      for (let a = 0; a < 8; a++) {
-        const p = edof[e * 8 + a];
-        u[a] = p >= 0 ? x[p] : 0;
-        disp[e * 8 + a] = u[a];
-      }
+    // Vergleichsspannung (von Mises) je Element, flächengewichteter Mittelwert je Kachel (Dreieck zählt halb).
+    // disp: Verschiebung je Kachel und Rasterknoten (M+1 mal M+1) fürs Zeichnen.
+    const R = M + 1, disp = new Float32Array(nT * R * R * 2), sum = new Float64Array(nT), wsum = new Float64Array(nT);
+    for (const el of [...quads, ...tris]) {
+      const u = el.dof.map(p => p >= 0 ? x[p] : 0), Sm = el.kind === 1 ? S : TS[el.kind], m = u.length;
       let sx = 0, sy = 0, t = 0;
-      for (let a = 0; a < 8; a++) { sx += S[a] * u[a]; sy += S[8 + a] * u[a]; t += S[16 + a] * u[a]; }
-      const ex = e % nx, ey = (e - ex) / nx;
-      sum[((ex / M) | 0) + ((ey / M) | 0) * TX] += Math.sqrt(sx * sx - sx * sy + sy * sy + 3 * t * t);
+      for (let a = 0; a < m; a++) { sx += Sm[a] * u[a]; sy += Sm[m + a] * u[a]; t += Sm[2 * m + a] * u[a]; }
+      const wt = el.kind === 1 ? 1 : 0.5;
+      sum[el.k] += wt * Math.sqrt(sx * sx - sx * sy + sy * sy + 3 * t * t);
+      wsum[el.k] += wt;
+      const tx = el.k % TX, ty = (el.k - tx) / TX;
+      el.pts.forEach(([i, j], c) => {
+        const o = (el.k * R * R + (j - ty * M) * R + (i - tx * M)) * 2;
+        disp[o] = u[2 * c]; disp[o + 1] = u[2 * c + 1];
+      });
     }
-    for (let k = 0; k < nT; k++) if (fe[k]) {
-      const util = sum[k] / (M * M) / RE;
+    for (let k = 0; k < nT; k++) if (fe[k] && wsum[k]) {
+      const util = sum[k] / wsum[k] / RE;
       res.tileUtil[k] = util;
       if (util > res.maxUtil) { res.maxUtil = util; res.maxTile = k; }
     }
@@ -525,35 +590,50 @@ const FEM = (() => {
     res.reason = res.ok ? '' : 'spannung';
     res.disp = disp;
     res.dofs = n;
-    res.elements = els.length;
+    res.elements = quads.length + tris.length;
     res.ms = performance.now() - t0;
     return res;
   }
 
-  // ESO: immer die am geringsten ausgelastete Kachel entfernen, die sich entfernen lässt,
-  // bis keine mehr geht. Generator, damit die Oberfläche zwischen den Rechnungen atmen kann.
+  // Freie Ecken einer vollen Kachel: beide angrenzenden Seiten ohne Material gegenüber (Rand oder Nachbar ohne Material dort)
+  function freeCorners(L, solid, conn, k) {
+    const tx = k % L.TX, ty = (k - tx) / L.TX;
+    const open = (x, y, side) => x < 0 || y < 0 || x >= L.TX || y >= L.TY || !conn[x + y * L.TX] || !(SIDES[solid[x + y * L.TX]] & side);
+    const l = open(tx - 1, ty, 2), r = open(tx + 1, ty, 1), b = open(tx, ty - 1, 8), t = open(tx, ty + 1, 4);
+    // abzuschneidende Ecke als neuer Zustand: unten links 2, unten rechts 3, oben rechts 4, oben links 5
+    return [l && b && 2, r && b && 3, r && t && 4, l && t && 5].filter(Boolean);
+  }
+
+  // ESO: immer die am geringsten ausgelastete Kachel entfernen, die sich entfernen lässt, bis keine mehr geht.
+  // Danach glätten: freie Ecken abschneiden und halbe Kacheln ganz entfernen, solange es hält.
+  // Generator, damit die Oberfläche zwischen den Rechnungen atmen kann.
   function* eso(L) {
-    let r = analyze(L, L.domain);
-    const order = [];
-    for (;;) {
+    let solid = L.domain.slice(), r = analyze(L, solid);
+    const order = [], cuts = [];
+    const masked = () => Uint8Array.from(solid, (s, k) => r.conn[k] ? s : 0);   // nur, was noch am Lager hängt
+    for (let phase = 0; phase < 2; phase++) for (;;) {
       const cand = [];
-      for (let k = 0; k < L.nT; k++) if (r.conn[k] && !L.frozen[k]) cand.push(k);
-      cand.sort((a, b) => r.tileUtil[a] - r.tileUtil[b]);
+      for (let k = 0; k < L.nT; k++) if (r.conn[k] && !L.frozen[k]) {
+        if (!phase) cand.push([k, 0]);
+        else if (solid[k] === 1) for (const s of freeCorners(L, solid, r.conn, k)) cand.push([k, s]);
+        else cand.push([k, 0]);
+      }
+      cand.sort((a, b) => r.tileUtil[a[0]] - r.tileUtil[b[0]]);
       let next = null;
-      for (const k of cand) {
-        const trial = r.conn.slice();
-        trial[k] = 0;
+      for (const [k, s] of cand) {
+        const trial = masked();
+        trial[k] = s;
         const t = analyze(L, trial);
-        yield order.length;
-        if (t.ok) { next = t; order.push(k); break; }
+        yield order.length + cuts.length;
+        if (t.ok) { next = t; solid = trial; (phase ? cuts : order).push(k); break; }
       }
       if (!next) break;
       r = next;
     }
-    return { res: r, order };
+    return { res: r, order, cuts, solid: masked() };
   }
 
-  return { M, TILE, THICK, RE, TILE_G, S, level, connect, analyze, eso };
+  return { M, TILE, THICK, RE, TILE_G, S, TRI, TK, TS, SIDES, CORNERS, AREA, squareKind, inShape, level, connect, attached, area, analyze, eso };
 })();
 if (typeof module !== 'undefined') module.exports = FEM;
 
@@ -943,7 +1023,8 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     eso: {}, esoRun: null, animId: 0, busy: false };
   let G = null;
   const C = {};
-  const removedPct = (L, conn) => 100 * (1 - count(conn) / count(L.domain));
+  // entfernt in Prozent; halbe Kacheln (abgeschnittene Ecke) zählen halb
+  const removedPct = (L, solid, conn) => 100 * (1 - FEM.area(solid, conn) / count(L.domain));
 
   function readColors() {
     const cs = getComputedStyle(document.documentElement);
@@ -1031,23 +1112,30 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     return tx < 0 || ty < 0 || tx >= st.L.TX || ty >= st.L.TY ? -1 : tx + ty * st.L.TX;
   }
 
-  // Randkanten einer Kachelmenge (in Kacheleinheiten), gleichgerichtete Stücke zusammengefasst
+  // Randkanten einer Kachelmenge (Werte: Kachelzustände, in Kacheleinheiten), gleichgerichtete Stücke zusammengefasst;
+  // halbe Kacheln liefern dazu ihre schräge Kante
   function edges(set) {
-    const L = st.L, out = [];
-    const has = (x, y) => x >= 0 && y >= 0 && x < L.TX && y < L.TY && set[x + y * L.TX];
+    const L = st.L, out = [], diag = [];
+    const has = (x, y, bit) => x >= 0 && y >= 0 && x < L.TX && y < L.TY && (FEM.SIDES[set[x + y * L.TX]] & bit);
     for (let k = 0; k < L.nT; k++) if (set[k]) {
-      const x = k % L.TX, y = (k - x) / L.TX;
-      if (!has(x, y - 1)) out.push([x, y, x + 1, y]);
-      if (!has(x, y + 1)) out.push([x, y + 1, x + 1, y + 1]);
-      if (!has(x - 1, y)) out.push([x, y, x, y + 1]);
-      if (!has(x + 1, y)) out.push([x + 1, y, x + 1, y + 1]);
+      const x = k % L.TX, y = (k - x) / L.TX, sd = FEM.SIDES[set[k]];
+      if ((sd & 4) && !has(x, y - 1, 8)) out.push([x, y, x + 1, y]);
+      if ((sd & 8) && !has(x, y + 1, 4)) out.push([x, y + 1, x + 1, y + 1]);
+      if ((sd & 1) && !has(x - 1, y, 2)) out.push([x, y, x, y + 1]);
+      if ((sd & 2) && !has(x + 1, y, 1)) out.push([x + 1, y, x + 1, y + 1]);
+      if (set[k] > 1) diag.push(set[k] === 3 || set[k] === 5 ? [x, y, x + 1, y + 1] : [x + 1, y, x, y + 1]);
     }
     const h = out.filter(q => q[1] === q[3]).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     const v = out.filter(q => q[0] === q[2]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const merged = [];
     for (const q of h) { const p = merged.at(-1); if (p && p[1] === p[3] && p[1] === q[1] && p[2] === q[0]) p[2] = q[2]; else merged.push(q); }
     for (const q of v) { const p = merged.at(-1); if (p && p[0] === p[2] && p[0] === q[0] && p[3] === q[1]) p[3] = q[3]; else merged.push(q); }
-    return merged;
+    return merged.concat(diag);
+  }
+  // Ecken einer Kachel auf dem Bildschirm (unten links, unten rechts, oben rechts, oben links), bei halben Kacheln ohne die abgeschnittene
+  function shapePts(k, s) {
+    const [x, y] = tileRect(k), q = [[x, y + G.s], [x + G.s, y + G.s], [x + G.s, y], [x, y]];
+    return s === 1 ? q : q.filter((_, i) => i !== s - 2);
   }
   function strokeSegs(segs) {
     ctx.beginPath();
@@ -1056,7 +1144,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
   function tilesPath(set) {
     ctx.beginPath();
-    for (let k = 0; k < st.L.nT; k++) if (set[k]) { const [x, y] = tileRect(k); ctx.rect(x, y, G.s, G.s); }
+    for (let k = 0; k < st.L.nT; k++) if (set[k]) {
+      const p = shapePts(k, set[k]);
+      p.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+      ctx.closePath();
+    }
   }
   function hatch(set, gap, both) {
     if (!set.some(Boolean)) return;
@@ -1069,27 +1161,27 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     }
     ctx.stroke(); ctx.restore();
   }
-  // Verformter Umriss einer Kachel aus ihren 4 M Randknoten, Verschiebung in mm mal Überhöhung
+  // Verformter Umriss einer Kachel aus ihren Randknoten (gegen den Uhrzeigersinn, ohne abgeschnittene Ecke),
+  // Verschiebung in mm mal Überhöhung; r.disp hält je Kachel die Verschiebungen ihrer Rasterknoten
   function tilePoly(r, k, scale) {
-    const L = st.L, tx = k % L.TX, ty = (k - tx) / L.TX, i0 = tx * M, j0 = ty * M, pts = [];
-    const ring = [];
-    for (let a = 0; a < M; a++) ring.push([i0 + a, j0]);
-    for (let a = 0; a < M; a++) ring.push([i0 + M, j0 + a]);
-    for (let a = 0; a < M; a++) ring.push([i0 + M - a, j0 + M]);
-    for (let a = 0; a < M; a++) ring.push([i0, j0 + M - a]);
-    for (const [i, j] of ring) {
-      const ex = Math.min(i, i0 + M - 1), ey = Math.min(j, j0 + M - 1), ci = i - ex, cj = j - ey;
-      const c = cj ? (ci ? 2 : 3) : (ci ? 1 : 0), e = ex + ey * L.nx;
-      pts.push([X(i) + scale * r.disp[e * 8 + 2 * c] / TILE * G.s, Y(j) - scale * r.disp[e * 8 + 2 * c + 1] / TILE * G.s]);
-    }
+    const L = st.L, tx = k % L.TX, ty = (k - tx) / L.TX, s = r.solid[k], R = M + 1, pts = [];
+    const cs = [[0, 0], [M, 0], [M, M], [0, M]].filter((_, i) => s === 1 || i !== s - 2);
+    cs.forEach(([a0, b0], n) => {
+      const [a1, b1] = cs[(n + 1) % cs.length];
+      for (let t = 0; t < M; t++) {
+        const a = a0 + (a1 - a0) * t / M, b = b0 + (b1 - b0) * t / M, o = (k * R * R + b * R + a) * 2;
+        pts.push([X(tx * M + a) + scale * r.disp[o] / TILE * G.s, Y(ty * M + b) - scale * r.disp[o + 1] / TILE * G.s]);
+      }
+    });
     return pts;
   }
   function nodeU(r, i, j) {
-    const L = st.L;
-    for (const [ex, ey, c] of [[i - 1, j - 1, 2], [i, j - 1, 3], [i - 1, j, 1], [i, j, 0]]) {
-      if (ex < 0 || ey < 0 || ex >= L.nx || ey >= L.ny || !r.fe[((ex / M) | 0) + ((ey / M) | 0) * L.TX]) continue;
-      const e = ex + ey * L.nx;
-      return [r.disp[e * 8 + 2 * c], r.disp[e * 8 + 2 * c + 1]];
+    const L = st.L, R = M + 1;
+    for (const tx of [Math.floor(i / M), Math.floor((i - 1) / M)]) for (const ty of [Math.floor(j / M), Math.floor((j - 1) / M)]) {
+      const k = tx + ty * L.TX, a = i - tx * M, b = j - ty * M;
+      if (tx < 0 || ty < 0 || tx >= L.TX || ty >= L.TY || !r.fe[k] || !FEM.inShape(r.solid[k], a, b)) continue;
+      const o = (k * R * R + b * R + a) * 2;
+      return [r.disp[o], r.disp[o + 1]];
     }
     return [0, 0];
   }
@@ -1113,8 +1205,12 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     if (st.view.mode === 'blind') {
       drawBlind(st.solid, st.conn, true);
       if (st.hover >= 0 && st.paint == null && st.L.domain[st.hover] && !st.L.frozen[st.hover] && editable()) {
-        const [x, y] = tileRect(st.hover);
-        ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, G.s - 2, G.s - 2);
+        const k = st.hover;
+        ctx.save(); ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
+        if (st.tool === 'corner') {   // Vorschau: die Form nach dem Klick, gestrichelt; fällt alles weg, die jetzige
+          ctx.setLineDash([4, 3]); polyPath(shapePts(k, cornerAction(k, st.hoverC, st.hoverIn) || st.solid[k] || 1)); ctx.stroke();
+        } else { const [x, y] = tileRect(k); ctx.strokeRect(x + 1, y + 1, G.s - 2, G.s - 2); }
+        ctx.restore();
       }
     } else drawResult(st.view);
     if (st.drag) drawDrag();
@@ -1126,7 +1222,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   // Vorschau beim Aufziehen: so sieht es nach dem Loslassen aus
   function drawDrag() {
     const d = st.drag, s = G.s, set = new Uint8Array(st.L.nT);
-    for (const k of rectTiles(d)) set[k] = 1;
+    for (const k of rectTiles(d)) set[k] = st.paint ? 1 : st.solid[k];
     const x0 = Math.min(d.a[0], d.b[0]), x1 = Math.max(d.a[0], d.b[0]), y0 = Math.min(d.a[1], d.b[1]), y1 = Math.max(d.a[1], d.b[1]);
     ctx.save();
     ctx.globalAlpha = 0.75; ctx.fillStyle = st.paint ? C.steel : C.sheet; tilesPath(set); ctx.fill();
@@ -1151,14 +1247,17 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     const L = st.L, s = G.s;
     const set = new Uint8Array(L.nT), fro = new Uint8Array(L.nT), loose = new Uint8Array(L.nT);
     for (let k = 0; k < L.nT; k++) if (solid[k] && (!only || only(k))) {
-      if (conn[k]) { set[k] = 1; fro[k] = L.frozen[k]; } else loose[k] = 1;
+      if (conn[k]) { set[k] = solid[k]; fro[k] = L.frozen[k]; } else loose[k] = solid[k];
     }
     ctx.fillStyle = C.steel; tilesPath(set); ctx.fill();
     hatch(set, s / 3.2, false);
     ctx.fillStyle = C.steel2; tilesPath(fro); ctx.fill();
     hatch(fro, s / 4, true);
     ctx.strokeStyle = C.steel2; ctx.lineWidth = 1; ctx.beginPath();
-    for (let k = 0; k < L.nT; k++) if (set[k]) { const [x, y] = tileRect(k); ctx.rect(x + 0.5, y + 0.5, s - 1, s - 1); }
+    for (let k = 0; k < L.nT; k++) {
+      if (set[k] === 1) { const [x, y] = tileRect(k); ctx.rect(x + 0.5, y + 0.5, s - 1, s - 1); }
+      else if (set[k]) { shapePts(k, set[k]).forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); }
+    }
     ctx.stroke();
     ctx.strokeStyle = C.ink; ctx.lineWidth = Math.max(1.5, s * 0.08); ctx.lineCap = 'square';
     strokeSegs(edges(set));
@@ -1182,12 +1281,14 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     } else {
       if (sweepCol < L.TX) drawBlind(v.solid, r.conn, false, k => k % L.TX >= sweepCol);
       const scale = v.scale * (v.defo == null ? 1 : v.defo);
-      if (scale) { ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = C.ink2; ctx.lineWidth = 1; strokeSegs(edges(r.fe)); ctx.restore(); }
+      if (scale) {
+        ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = C.ink2; ctx.lineWidth = 1;
+        strokeSegs(edges(Uint8Array.from(r.fe, (f, k) => f ? r.solid[k] : 0))); ctx.restore();
+      }
       for (let k = 0; k < L.nT; k++) {
         if (!r.conn[k] || falling(k) || k % L.TX >= sweepCol) continue;
         if (!r.fe[k]) {   // hängt am Lager, trägt aber nichts
-          const [x, y] = tileRect(k);
-          ctx.fillStyle = C.steel; ctx.fillRect(x, y, s, s); ctx.strokeStyle = C.rule; ctx.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+          polyPath(shapePts(k, r.solid[k])); ctx.fillStyle = C.steel; ctx.fill(); ctx.strokeStyle = C.rule; ctx.lineWidth = 1; ctx.stroke();
           continue;
         }
         const p = tilePoly(r, k, scale);
@@ -1204,7 +1305,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       if (sweepCol >= L.TX && !(v.fall && v.fall.p > 0)) drawMax(r, scale);
     }
     if (v.loose) drawFalling(v.loose.set, v.loose.p, () => C.steel);
-    else drawLoose(v.solid.map((x, k) => x && !r.conn[k] ? 1 : 0));
+    else drawLoose(v.solid.map((x, k) => x && !r.conn[k] ? x : 0));
     if (v.fall) drawFalling(v.fall.set, v.fall.p, k => r.disp && r.fe[k] ? bandOf(r.tileUtil[k]) : C.steel);
   }
 
@@ -1213,12 +1314,13 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     const s = G.s;
     ctx.save(); ctx.globalAlpha = 1 - clamp01((p - 0.65) / 0.35);
     for (let k = 0; k < st.L.nT; k++) if (set[k]) {
-      const [x, y] = tileRect(k), h = ((k * 2654435761) >>> 0) / 4294967296;
+      const [x, y] = tileRect(k), h = ((k * 2654435761) >>> 0) / 4294967296, cx = x + s / 2, cy = y + s / 2;
       ctx.save();
-      ctx.translate(x + s / 2 + (h - 0.5) * s * 1.5 * p, y + s / 2 + p * p * (G.H * 0.9 + s * 2 * h));
+      ctx.translate(cx + (h - 0.5) * s * 1.5 * p, cy + p * p * (G.H * 0.9 + s * 2 * h));
       ctx.rotate((h - 0.5) * 2.4 * p);
-      ctx.fillStyle = color(k); ctx.fillRect(-s / 2, -s / 2, s, s);
-      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.strokeRect(-s / 2, -s / 2, s, s);
+      polyPath(shapePts(k, set[k]).map(([px, py]) => [px - cx, py - cy]));
+      ctx.fillStyle = color(k); ctx.fill();
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
     }
     ctx.restore();
@@ -1339,7 +1441,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   function panel() {
     if (st.phase === 'edit') return edPanel();
     const L = st.L, d = st.def, total = count(L.domain);
-    const kept = count(st.phase === 'eso' ? st.eso[st.key].res.conn : st.conn);
+    const e = st.eso[st.key], kept = st.phase === 'eso' ? FEM.area(e.solid, e.res.conn) : FEM.area(st.solid, st.conn);
     $('tb-name').textContent = partName(d);
     $('tb-load').textContent = loadLabel(d.loads[0]);
     $('tb-size').textContent = `${d.tx * TILE} × ${d.ty * TILE} × ${THICK} mm`;
@@ -1380,13 +1482,13 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
-    $('t-rect').disabled = $('t-brush').disabled = !design || st.busy;
+    $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = !design || st.busy;
     cv.classList.toggle('locked', !design);
   }
 
   // Nach jeder Änderung im Entwurf
   function refresh() {
-    st.conn = FEM.connect(st.L, st.solid, st.L.supportTiles);
+    st.conn = FEM.attached(st.L, st.solid);
     const loose = st.solid.some((x, k) => x && !st.conn[k]);
     const hint = loose ? '<p>Rot gestrichelte Kacheln haben keine Verbindung zum Lager und fallen beim Abgeben ab.</p>' : '';
     if (st.open && st.phase === 'design') {
@@ -1396,7 +1498,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       showFem(r, 0);
       st.liveText = `Offene Karten: ${statusText(r)} Jede Wegnahme ist endgültig.`;
       $('verdict').innerHTML = `<p>${st.liveText}</p>${hint}`;
-      if (mp.role === 'player') pres({ rm: Math.round(removedPct(st.L, st.conn) * 10) });   // Fortschritt für den Beamer
+      if (mp.role === 'player') pres({ rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });   // Fortschritt für den Beamer
     } else if (!mp.on && $('live').checked) {
       const r = FEM.analyze(st.L, st.solid);
       st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
@@ -1493,16 +1595,15 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     const L = st.L, r = FEM.analyze(L, st.solid), fe = !!r.disp;
     st.res = r; st.phase = 'result'; st.busy = true;
     const loose = new Uint8Array(L.nT);
-    for (let k = 0; k < L.nT; k++) loose[k] = st.solid[k] && !r.conn[k] ? 1 : 0;
+    for (let k = 0; k < L.nT; k++) loose[k] = st.solid[k] && !r.conn[k] ? st.solid[k] : 0;
     // Was nach dem Versagen abfällt: überlastete Kacheln und alles, was dann nicht mehr am Lager hängt
     let fall = null;
     if (r.reason === 'spannung') {
-      const rest = r.conn.slice();
-      for (let k = 0; k < L.nT; k++) if (r.tileUtil[k] > 1) rest[k] = 0;
-      const keep = FEM.connect(L, rest, L.supportTiles);
+      const rest = Uint8Array.from(st.solid, (s, k) => r.conn[k] && !(r.tileUtil[k] > 1) ? s : 0);
+      const keep = FEM.attached(L, rest);
       fall = new Uint8Array(L.nT);
-      for (let k = 0; k < L.nT; k++) fall[k] = r.conn[k] && !keep[k] ? 1 : 0;
-    } else if (r.reason === 'mechanismus') fall = r.fe.slice();
+      for (let k = 0; k < L.nT; k++) fall[k] = r.conn[k] && !keep[k] ? st.solid[k] : 0;
+    } else if (r.reason === 'mechanismus') fall = Uint8Array.from(r.fe, (f, k) => f ? st.solid[k] : 0);
     const v = st.view = { mode: 'result', res: r, solid: st.solid, scale: fe ? niceScale(r) : 0, sweep: fe ? 0 : 1,
       defo: 0, t: 0, loose: { set: loose, p: 0 }, fall: fall && { set: fall, p: 0 } };
     showFem(r, v.scale);
@@ -1529,7 +1630,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
 
   function verdict() {
-    const r = st.res, L = st.L, total = count(L.domain), rem = removedPct(L, r.conn), e = st.eso[st.key];
+    const r = st.res, L = st.L, rem = removedPct(L, r.solid, r.conn), e = st.eso[st.key];
     let h;
     if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${fmt(100 * r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
     else {
@@ -1543,7 +1644,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     }
     if (!e) h += '<p>Der Algorithmus rechnet noch …</p>';
     else {
-      const er = 100 * (1 - count(e.res.conn) / total);
+      const er = removedPct(L, e.solid, e.res.conn);
       let cmp = '';
       if (r.ok) cmp = rem > er + 1e-9 ? 'Algorithmus geschlagen!' : rem > er - 1e-9 ? 'Gleichstand mit dem Algorithmus.'
         : er - rem <= 5 ? 'Knapp dran.' : 'Da geht noch was.';
@@ -1569,7 +1670,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
   function shareLink() {
     const base = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? location.origin + location.pathname : PUBLIC_URL;
-    const pct10 = Math.round(removedPct(st.L, st.res.conn) * 10), name = clean($('share-name').value, 16) || 'Jemand';
+    const pct10 = Math.round(removedPct(st.L, st.res.solid, st.res.conn) * 10), name = clean($('share-name').value, 16) || 'Jemand';
     return `${base}#duell~${partKey()}~${st.open ? 'o' : 'b'}~${pct10}~${encodeURIComponent(name)}`;
   }
   // oben im Bedienfeld: vor dem Werten das Ziel, danach der Ausgang
@@ -1581,7 +1682,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     let h = `<p><b>Herausforderung von ${who}</b> (${duel.open ? 'offene Karten' : 'blind'}): ${who} hat ${goal} entfernt, ` +
       'und das Bauteil hält. Schaffen Sie mehr?</p>';
     if (st.phase === 'result' && st.res && !st.busy) {
-      const mine = st.res.ok ? Math.round(removedPct(st.L, st.res.conn) * 10) : -1;
+      const mine = st.res.ok ? Math.round(removedPct(st.L, st.res.solid, st.res.conn) * 10) : -1;
       h = mine > duel.pct10 ? `<p><span class="t-ok">Gewonnen!</span> ${fmt(mine / 10, 1)} % gegen ${goal} von ${who}.</p>`
         : mine === duel.pct10 ? `<p><b>Gleichstand</b> mit ${who}: beide ${goal}.</p>`
         : `<p><span class="t-bad">${who} liegt vorn:</span> ${goal} gegen ${mine < 0 ? 'Bruch' : fmt(mine / 10, 1) + ' %'}.</p>`;
@@ -1598,11 +1699,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       showFem(st.res, st.view.scale); stamp(st.res.ok); verdict();
     } else {
       st.resultView = st.view; st.phase = 'eso';
-      st.view = { mode: 'result', res: e.res, solid: e.res.conn, scale: niceScale(e.res) };
+      st.view = { mode: 'result', res: e.res, solid: e.solid, scale: niceScale(e.res) };
       $('stamp').hidden = true; showFem(e.res, st.view.scale);
-      const er = 100 * (1 - count(e.res.conn) / count(st.L.domain));
-      $('verdict').innerHTML = `<p>Lösung der Evolutionären Strukturoptimierung: ${fmt(er, 1)} % entfernt in ${e.order.length} Schritten, ` +
-        `max. Auslastung ${fmt(100 * e.res.maxUtil)} %.</p>`;
+      const er = removedPct(st.L, e.solid, e.res.conn);
+      $('verdict').innerHTML = `<p>Lösung der Evolutionären Strukturoptimierung: ${fmt(er, 1)} % entfernt, ${e.order.length} ganze Kacheln ` +
+        `und ${e.cuts.length} ${e.cuts.length === 1 ? 'Ecke' : 'Ecken'} zum Glätten, max. Auslastung ${fmt(100 * e.res.maxUtil)} %.</p>`;
     }
     panel(); controls(); render();
   }
@@ -1935,24 +2036,21 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     mpRender();
   }
 
-  // Entwurf als 6 Bit je Zeichen; fremde Entwürfe werden geprüft: gesperrte Kacheln bleiben, außerhalb des Bauteils nichts
+  // Entwurf: je Zeichen zwei Kacheln mit je 3 Bit (Zustand 0 bis 5); fremde Entwürfe werden geprüft:
+  // gesperrte Kacheln bleiben voll, außerhalb des Bauteils nichts
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
   function encode(solid) {
     let s = '';
-    for (let i = 0; i < solid.length; i += 6) {
-      let v = 0;
-      for (let b = 0; b < 6; b++) v = v * 2 + (solid[i + b] ? 1 : 0);
-      s += B64[v];
-    }
+    for (let i = 0; i < solid.length; i += 2) s += B64[solid[i] * 8 + (solid[i + 1] || 0)];
     return s;
   }
   function decode(str, L) {
-    if (typeof str !== 'string' || str.length !== Math.ceil(L.nT / 6)) return null;
+    if (typeof str !== 'string' || str.length !== Math.ceil(L.nT / 2)) return null;
     const out = new Uint8Array(L.nT);
     for (let i = 0; i < str.length; i++) {
       const v = B64.indexOf(str[i]);
       if (v < 0) return null;
-      for (let b = 0; b < 6; b++) if (i * 6 + b < L.nT) out[i * 6 + b] = (v >> (5 - b)) & 1;
+      for (const [k, x] of [[2 * i, v >> 3], [2 * i + 1, v & 7]]) if (k < L.nT) out[k] = x <= 5 ? x : 0;
     }
     for (let k = 0; k < L.nT; k++) out[k] = L.domain[k] ? (L.frozen[k] ? 1 : out[k]) : 0;
     return out;
@@ -2023,7 +2121,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1 });
     // blind: auch direkt nach einer Probe-Rechnung wird der Entwurf wieder ohne Spannungen gezeigt
     if (!st.open) { st.view = { mode: 'blind' }; $('legend').hidden = true; $('femline').textContent = ''; }
-    pres({ r: mp.rid, s: 1, d: encode(st.solid), rm: Math.round(removedPct(st.L, st.conn) * 10) });
+    pres({ r: mp.rid, s: 1, d: encode(st.solid), rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });
     controls(); render(); mpRender();
   }
   // Offene Karten im Wettkampf: das Bauteil ist gebrochen, die Person ist in dieser Runde raus
@@ -2107,7 +2205,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       const q = p.presence, solid = q.r === mp.g.rid && q.s === 1 ? decode(q.d, L) : null;
       if (!solid) continue;
       const res = FEM.analyze(L, solid);
-      list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, res.conn) * 10) / 10,
+      list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, solid, res.conn) * 10) / 10,
         pu: probesUsed(q) });
     }
     for (const e of list) {
@@ -2185,13 +2283,16 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       const tx = k % L.TX, ty = (k - tx) / L.TX, x = x0 + s / 2 + tx * s, y = H - s / 2 - (ty + 1) * s;
       if (!solid[k] || (r && !r.conn[k])) { c.strokeStyle = C.grid; c.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1); continue; }
       c.fillStyle = r && r.disp && r.fe[k] ? bandOf(r.tileUtil[k]) : L.frozen[k] ? C.steel2 : C.steel;
-      c.fillRect(x, y, s, s);
-      c.strokeStyle = 'rgba(8,16,28,0.2)'; c.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+      c.beginPath();   // Quadrat oder Dreieck ohne die abgeschnittene Ecke
+      [[x, y + s], [x + s, y + s], [x + s, y], [x, y]].filter((_, i) => solid[k] === 1 || i !== solid[k] - 2)
+        .forEach(([px, py], i) => i ? c.lineTo(px, py) : c.moveTo(px, py));
+      c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(8,16,28,0.2)'; c.stroke();
     }
   }
 
   // ---------- Wettkampf: Anzeige ----------
-  const esoNow = () => st.eso[st.key] ? removedPct(st.L, st.eso[st.key].res.conn) : null;
+  const esoNow = () => st.eso[st.key] ? removedPct(st.L, st.eso[st.key].solid, st.eso[st.key].res.conn) : null;
   // Platz je Eintrag der sortierten Liste; gleicher Wert gleicher Platz, alle Brüche teilen sich den letzten
   const places = list => list.map((e, i) => {
     let p = i;
@@ -2406,7 +2507,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       const me = myPeer(), i = res.findIndex(e => e.peer === me), r = mp.own;
       let t = 'Rechnet …';
       if (r) {
-        t = r.ok ? `<span class="t-ok">Hält.</span> Sie haben ${fmt(removedPct(st.L, r.conn), 1)} % entfernt.`
+        t = r.ok ? `<span class="t-ok">Hält.</span> Sie haben ${fmt(removedPct(st.L, r.solid, r.conn), 1)} % entfernt.`
           : `<span class="t-bad">Bruch.</span> ${failWhy(r)} Gewertet: 0 %.`;
         t += i >= 0 ? ` Platz ${places(res)[i]} von ${res.length}.` : res.length ? ' Ihr Entwurf kam nicht rechtzeitig an und wird nicht gewertet.' : '';
       }
@@ -2478,12 +2579,41 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     return out;
   }
   const lockedMsg = () => { $('verdict').innerHTML = '<p>Diese Kachel ist gesperrt: Hier sitzt ein Lager oder greift die Last an.</p>'; };
+  // Ecke: Kachel und Ecke unter dem Zeiger (c: 0 unten links, 1 unten rechts, 2 oben rechts, 3 oben links),
+  // inside: liegt der Punkt im Material der Kachel?
+  function cornerAt(e) {
+    const b = cv.getBoundingClientRect(), fx = (e.clientX - b.left - G.ox) / G.s, fy = (G.oy - e.clientY + b.top) / G.s;
+    const tx = Math.floor(fx), ty = Math.floor(fy), u = fx - tx, v = fy - ty;
+    if (tx < 0 || ty < 0 || tx >= st.L.TX || ty >= st.L.TY) return null;
+    const k = tx + ty * st.L.TX, s = st.solid[k];
+    const inside = s === 1 || (s === 2 && u + v >= 1) || (s === 3 && v >= u) || (s === 4 && u + v <= 1) || (s === 5 && v <= u);
+    return { k, c: v < 0.5 ? (u < 0.5 ? 0 : 1) : (u < 0.5 ? 3 : 2), inside };
+  }
+  // Neuer Zustand nach einem Klick mit „Ecke“: Eine volle Kachel verliert die Ecke. Bei einer halben nimmt ein Klick ins
+  // Material den Rest weg, einer in die freie Ecke macht sie wieder voll. Auf einer leeren entsteht das Dreieck in dieser Ecke.
+  // Bei offenen Karten kommt nichts zurück.
+  function cornerAction(k, c, inside) {
+    const s = st.solid[k];
+    if (s === 1) return c + 2;
+    if (s > 1) return inside ? 0 : st.open ? s : 1;
+    return st.open ? 0 : ((c + 2) % 4) + 2;
+  }
   const pushUndo = () => { st.undo.push(st.solid.slice()); if (st.undo.length > 200) st.undo.shift(); };
 
   cv.addEventListener('pointerdown', e => {
     if (!editable()) return;
     const k = tileAt(e), L = st.L;
     if (k < 0) return;
+    if (st.tool === 'corner') {
+      const h = cornerAt(e);
+      if (!h || !L.domain[k]) return;
+      if (L.frozen[k]) { lockedMsg(); return; }
+      const ns = cornerAction(k, h.c, h.inside);
+      if (ns === st.solid[k]) return;
+      e.preventDefault();
+      pushUndo(); st.solid[k] = ns; st.phase = 'design'; refresh();
+      return;
+    }
     if (st.tool === 'brush' && (!L.domain[k] || L.frozen[k])) { if (L.frozen[k]) lockedMsg(); return; }
     e.preventDefault();
     cv.setPointerCapture(e.pointerId);
@@ -2500,7 +2630,10 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       return;
     }
     if (st.paint == null) {
-      if (e.pointerType === 'mouse' && editable()) { const k = tileAt(e); if (k !== st.hover) { st.hover = k; render(); } }
+      if (e.pointerType === 'mouse' && editable()) {
+        const k = tileAt(e), h = st.tool === 'corner' && k >= 0 ? cornerAt(e) : null, c = h ? h.c : -1, inside = !!(h && h.inside);
+        if (k !== st.hover || c !== st.hoverC || inside !== st.hoverIn) { st.hover = k; st.hoverC = c; st.hoverIn = inside; render(); }
+      }
       return;
     }
     // Zwischenpunkte, damit schnelle Striche keine Kacheln überspringen
@@ -2535,9 +2668,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     st.tool = t;
     $('t-rect').setAttribute('aria-pressed', String(t === 'rect'));
     $('t-brush').setAttribute('aria-pressed', String(t === 'brush'));
+    $('t-corner').setAttribute('aria-pressed', String(t === 'corner'));
   };
   $('t-rect').onclick = () => setTool('rect');
   $('t-brush').onclick = () => setTool('brush');
+  $('t-corner').onclick = () => setTool('corner');
   $('b-submit').onclick = submit;
   $('b-probe').onclick = probe;
   $('b-undo').onclick = undo;
