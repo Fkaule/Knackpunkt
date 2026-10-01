@@ -260,6 +260,17 @@
   // Vorschau beim Aufziehen: so sieht es nach dem Loslassen aus
   function drawDrag() {
     const d = st.drag, s = G.s, set = new Uint8Array(st.L.nT);
+    if (d.corner) {   // Linie: was wegfällt, ganze Kacheln und abgeschnittene Dreiecke, dazu die Linie selbst
+      if (isClick(d)) return;
+      for (const [k, ns] of lineChanges(d)) set[k] = ns ? (ns - 2 + 2) % 4 + 2 : st.solid[k];
+      const b = cv.getBoundingClientRect();
+      ctx.save();
+      ctx.globalAlpha = 0.75; ctx.fillStyle = C.sheet; tilesPath(set); ctx.fill();
+      ctx.globalAlpha = 1; ctx.setLineDash([6, 4]); ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(d.p0[0] - b.left, d.p0[1] - b.top); ctx.lineTo(d.p1[0] - b.left, d.p1[1] - b.top); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     for (const k of rectTiles(d)) set[k] = st.paint ? 1 : st.solid[k];
     const x0 = Math.min(d.a[0], d.b[0]), x1 = Math.max(d.a[0], d.b[0]), y0 = Math.min(d.a[1], d.b[1]), y1 = Math.max(d.a[1], d.b[1]);
     ctx.save();
@@ -1616,6 +1627,32 @@
       }
     return out;
   }
+  // Linie mit „Ecke“: Kacheln unter der Linie fallen weg, danach verlieren angrenzende volle Kacheln mit genau einer freien
+  // Ecke diese Ecke (alle auf einmal). Quer durchs Material wird so ein glatter schräger Schlitz, entlang einer Treppenkante
+  // im Freien gezogen wird die Kante glatt. Ergebnis: Liste [Kachel, neuer Zustand].
+  const isClick = d => Math.hypot(d.p1[0] - d.p0[0], d.p1[1] - d.p0[1]) < G.s * 0.3;
+  function lineChanges(d) {
+    const L = st.L, on = new Set(), [x0, y0] = d.p0, [x1, y1] = d.p1;
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (G.s / 4)));
+    for (let i = 0; i <= n; i++) {
+      const k = tileAt({ clientX: x0 + (x1 - x0) * i / n, clientY: y0 + (y1 - y0) * i / n });
+      if (k >= 0) on.add(k);
+    }
+    const next = st.solid.slice(), out = [], near = new Set();
+    for (const k of on) if (L.domain[k] && !L.frozen[k] && next[k]) { next[k] = 0; out.push([k, 0]); }
+    const conn = FEM.attached(L, next);
+    for (const k of on) {
+      const tx = k % L.TX, ty = (k - tx) / L.TX;
+      for (let y = Math.max(0, ty - 1); y <= Math.min(L.TY - 1, ty + 1); y++)
+        for (let x = Math.max(0, tx - 1); x <= Math.min(L.TX - 1, tx + 1); x++) near.add(x + y * L.TX);
+    }
+    for (const k of near) {
+      if (on.has(k) || next[k] !== 1 || !conn[k] || L.frozen[k]) continue;
+      const f = FEM.freeCorners(L, next, conn, k);
+      if (f.length === 1) out.push([k, f[0]]);
+    }
+    return out;
+  }
   const lockedMsg = () => { $('verdict').innerHTML = '<p>Diese Kachel ist gesperrt: Hier sitzt ein Lager oder greift die Last an.</p>'; };
   // Ecke: Kachel und Ecke unter dem Zeiger (c: 0 unten links, 1 unten rechts, 2 oben rechts, 3 oben links),
   // inside: liegt der Punkt im Material der Kachel?
@@ -1642,14 +1679,14 @@
     if (!editable()) return;
     const k = tileAt(e), L = st.L;
     if (k < 0) return;
-    if (st.tool === 'corner') {
+    if (st.tool === 'corner') {   // Klick schneidet beim Loslassen eine Ecke ab, Ziehen glättet alle Treppenstufen im Rechteck
       const h = cornerAt(e);
-      if (!h || !L.domain[k]) return;
-      if (L.frozen[k]) { lockedMsg(); return; }
-      const ns = cornerAction(k, h.c, h.inside);
-      if (ns === st.solid[k]) return;
+      if (!h) return;
       e.preventDefault();
-      pushUndo(); st.solid[k] = ns; st.phase = 'design'; refresh();
+      cv.setPointerCapture(e.pointerId);
+      const c = cell(e);
+      st.drag = { a: c, b: c, k, corner: h, p0: [e.clientX, e.clientY], p1: [e.clientX, e.clientY] };
+      render();
       return;
     }
     if (st.tool === 'brush' && (!L.domain[k] || L.frozen[k])) { if (L.frozen[k]) lockedMsg(); return; }
@@ -1662,6 +1699,7 @@
     setTile(k); refresh();
   });
   cv.addEventListener('pointermove', e => {
+    if (st.drag && st.drag.corner) { st.drag.p1 = [e.clientX, e.clientY]; render(); return; }
     if (st.drag) {
       const c = cell(e);
       if (c[0] !== st.drag.b[0] || c[1] !== st.drag.b[1]) { st.drag.b = c; render(); }
@@ -1685,6 +1723,17 @@
     const d = st.drag;
     st.drag = null;
     if (!d) { st.paint = null; return; }
+    if (d.corner) {
+      const L = st.L, click = isClick(d);
+      if (click && L.frozen[d.k]) { lockedMsg(); return render(); }
+      const changes = (click ? (L.domain[d.k] ? [[d.k, cornerAction(d.k, d.corner.c, d.corner.inside)]] : []) : lineChanges(d))
+        .filter(([k, s]) => s !== st.solid[k]);
+      if (!changes.length) return render();
+      pushUndo();
+      for (const [k, s] of changes) st.solid[k] = s;
+      st.phase = 'design';
+      return refresh();
+    }
     const tiles = rectTiles(d);
     if (tiles.length) {
       pushUndo();
@@ -1699,7 +1748,10 @@
   cv.addEventListener('pointercancel', () => { st.drag = null; st.paint = null; render(); });
   cv.addEventListener('pointerleave', () => { if (st.hover >= 0) { st.hover = -1; render(); } });
   addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+    // R, P, E wählen das Werkzeug, solange nicht in ein Eingabefeld getippt wird
+    const tool = { r: 'rect', p: 'brush', e: 'corner' }[e.key.toLowerCase()];
+    if (tool && !e.metaKey && !e.ctrlKey && !e.altKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && st.phase !== 'edit') setTool(tool);
   });
 
   const setTool = t => {

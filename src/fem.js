@@ -356,6 +356,7 @@ const FEM = (() => {
     return { res: r, order, cuts, solid: masked() };
   }
 
-  return { M, TILE, THICK, RE, TILE_G, S, TRI, TK, TS, SIDES, CORNERS, AREA, squareKind, inShape, level, connect, attached, area, analyze, eso };
+  return { M, TILE, THICK, RE, TILE_G, S, TRI, TK, TS, SIDES, CORNERS, AREA, squareKind, inShape, level, connect, attached, area,
+    freeCorners, analyze, eso };
 })();
 if (typeof module !== 'undefined') module.exports = FEM;

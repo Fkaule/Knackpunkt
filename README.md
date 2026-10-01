@@ -103,7 +103,7 @@ Alle Elemente sind gleich große Quadrate, deshalb wird $`\mathbf K_e`$ nur einm
 
 ### 3a. Halbe Kacheln: Dreieckselemente
 
-Mit dem Werkzeug „Ecke“ lässt sich von einer Kachel eine Ecke schräg abschneiden. Übrig bleibt ein rechtwinkliges Dreieck mit 10 mm Katheten, also eine halbe Kachel. Das Netz bleibt dasselbe 2,5-mm-Raster: Rasterquadrate, die ganz im Material liegen, bleiben Viereckelemente; die vier Quadrate auf der Schnittkante werden durch ihre Diagonale geteilt, und die Hälfte im Material wird ein lineares Dreieckselement (CST, konstante Dehnung). Neue Knoten entstehen nicht.
+Mit dem Werkzeug „Ecke“ lässt sich von einer Kachel eine Ecke schräg abschneiden. Übrig bleibt ein rechtwinkliges Dreieck mit 10 mm Katheten, also eine halbe Kachel. Schneller geht es mit einer gezogenen Linie: Kacheln unter der Linie fallen weg, und angrenzende volle Kacheln mit genau einer freien Ecke verlieren diese Ecke. Quer durchs Material entsteht so ein glatter schräger Schlitz, entlang einer Treppenkante eine glatte Schräge. Die Tasten R, P und E wählen Rechteck, Pinsel und Ecke. Das Netz bleibt dasselbe 2,5-mm-Raster: Rasterquadrate, die ganz im Material liegen, bleiben Viereckelemente; die vier Quadrate auf der Schnittkante werden durch ihre Diagonale geteilt, und die Hälfte im Material wird ein lineares Dreieckselement (CST, konstante Dehnung). Neue Knoten entstehen nicht.
 
 ```math
 \mathbf K_e = t\,A\,\mathbf B^T \mathbf D\,\mathbf B, \qquad \boldsymbol\sigma_e = \mathbf D\,\mathbf B\,\mathbf u_e, \qquad
