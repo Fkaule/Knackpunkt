@@ -57,7 +57,7 @@
   // Herausforderung per Link: { key (Bauteil), open, pct10 (entfernte Prozent mal 10), name, part (Argumente für loadLevel) }
   let duel = null;
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
-    res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', drag: null,
+    res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
     eso: {}, esoRun: null, animId: 0, busy: false };
   let G = null;
   const C = {};
@@ -260,15 +260,16 @@
   // Vorschau beim Aufziehen: so sieht es nach dem Loslassen aus
   function drawDrag() {
     const d = st.drag, s = G.s, set = new Uint8Array(st.L.nT);
-    if (d.corner) {   // Linie: was dazukommt oder wegfällt (ganze Kacheln und Dreiecke), dazu die Linie selbst
+    if (d.line) {   // Linie: was dazukommt oder wegfällt (ganze und halbe Kacheln), dazu die Mittellinie des Bands
       if (isClick(d)) return;
-      const { add, changes } = lineChanges(d);
-      for (const [k, ns] of changes) set[k] = add ? ns : ns ? (ns - 2 + 2) % 4 + 2 : st.solid[k];
-      const b = cv.getBoundingClientRect();
+      const add = lineAdds(), Q = QUARTERS;
+      for (const [k, ns] of lineChanges(d)) set[k] = Q.indexOf(add ? Q[ns] & ~Q[st.solid[k]] : Q[st.solid[k]] & ~Q[ns]);
+      const { o, c, l0, l1 } = lineBand(d), m = c + st.lineW / 2;
+      const pt = l => { const [x, y] = [[l, m], [(l + m) / 2, (l - m) / 2], [m, l], [(m + l) / 2, (m - l) / 2]][o]; return [G.ox + x * s, G.oy - y * s]; };
       ctx.save();
       ctx.globalAlpha = 0.75; ctx.fillStyle = add ? C.steel : C.sheet; tilesPath(set); ctx.fill();
       ctx.globalAlpha = 1; ctx.setLineDash([6, 4]); ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(d.p0[0] - b.left, d.p0[1] - b.top); ctx.lineTo(d.p1[0] - b.left, d.p1[1] - b.top); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(...pt(l0)); ctx.lineTo(...pt(l1)); ctx.stroke();
       ctx.restore();
       return;
     }
@@ -532,7 +533,9 @@
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
-    $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = !design || st.busy;
+    $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = $('t-line').disabled = !design || st.busy;
+    for (const b of $('lopts').querySelectorAll('button')) b.disabled = !design || st.busy || (b.id === 'l-add' && st.open);
+    $('l-add').setAttribute('aria-pressed', String(lineAdds())); $('l-cut').setAttribute('aria-pressed', String(!lineAdds()));
     cv.classList.toggle('locked', !design);
   }
 
@@ -1628,44 +1631,40 @@
       }
     return out;
   }
-  // Linie mit „Ecke“, wie Rechteck und Pinsel je nach Start:
-  // Beginnt sie auf Material, fallen die Kacheln darunter weg, und angrenzende volle Kacheln mit genau einer freien Ecke
-  // verlieren diese Ecke: ein glatter schräger Schlitz. Beginnt sie auf einer leeren Kachel (nicht bei offenen Karten),
-  // werden die Kacheln darunter voll, und leere Nachbarn mit Material an genau zwei angrenzenden Seiten bekommen das
-  // Dreieck in diese Ecke: ein glatter schräger Steg. Ergebnis: { add, changes: [[Kachel, neuer Zustand], ...] }.
-  const isClick = d => Math.hypot(d.p1[0] - d.p0[0], d.p1[1] - d.p0[1]) < G.s * 0.3;
+  // Linie: ein Band der gewählten Dicke von p0 nach p1 (Kacheleinheiten, y nach oben), Richtung auf 0°, 45°, 90° oder 135°
+  // gerastet. Gerade Bänder sind 1 bis 3 Kachelreihen (10 bis 30 mm). Schräge liegen mit beiden Kanten auf Kacheldiagonalen:
+  // außen halbe, innen volle Kacheln (7, 14 oder 21 mm). Hinzufügen vereinigt das Band mit dem Entwurf, Entfernen zieht es ab;
+  // was dabei keine ganze oder halbe Kachel ergibt, wird beim Hinzufügen voll und beim Entfernen leer.
+  const QUARTERS = [0, 15, 6, 12, 9, 3];   // Zustand als Viertel der Kachel: unten 1, rechts 2, oben 4, links 8
+  const lineAdds = () => st.lineAdd && !st.open;   // offene Karten: nur wegnehmen
+  const isClick = d => Math.hypot(d.p1[0] - d.p0[0], d.p1[1] - d.p0[1]) < 0.3;
+  const tilePt = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left - G.ox) / G.s, (G.oy - e.clientY + b.top) / G.s]; };
+  // o: Richtung (0 waagrecht, 1 steigend, 2 senkrecht, 3 fallend), c: Unterkante des Bands quer zur Linie, l0 bis l1: Länge
+  function lineBand(d) {
+    const [x0, y0] = d.p0, [x1, y1] = d.p1;
+    const o = (Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) + 4) % 4;
+    const q = [(x, y) => y, (x, y) => x - y, (x, y) => x, (x, y) => x + y][o];   // quer zur Linie
+    const l = [(x, y) => x, (x, y) => x + y, (x, y) => y, (x, y) => x - y][o];   // längs
+    return { o, c: Math.round(q(x0, y0) - st.lineW / 2), l0: Math.min(l(x0, y0), l(x1, y1)), l1: Math.max(l(x0, y0), l(x1, y1)) };
+  }
+  // Ergebnis: [[Kachel, neuer Zustand], ...]
   function lineChanges(d) {
-    const L = st.L, on = new Set(), [x0, y0] = d.p0, [x1, y1] = d.p1, add = !st.open && L.domain[d.k] && !st.solid[d.k];
-    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (G.s / 4)));
-    for (let i = 0; i <= n; i++) {
-      const k = tileAt({ clientX: x0 + (x1 - x0) * i / n, clientY: y0 + (y1 - y0) * i / n });
-      if (k >= 0) on.add(k);
-    }
-    const next = st.solid.slice(), out = [], near = new Set();
-    for (const k of on) {
+    const L = st.L, Q = QUARTERS, add = lineAdds(), w = st.lineW, { o, c, l0, l1 } = lineBand(d), out = [];
+    for (let k = 0; k < L.nT; k++) {
+      if (!L.domain[k] || (!add && L.frozen[k])) continue;
       const tx = k % L.TX, ty = (k - tx) / L.TX;
-      for (let y = Math.max(0, ty - 1); y <= Math.min(L.TY - 1, ty + 1); y++)
-        for (let x = Math.max(0, tx - 1); x <= Math.min(L.TX - 1, tx + 1); x++) near.add(x + y * L.TX);
-    }
-    if (add) {
-      for (const k of on) if (L.domain[k] && next[k] !== 1) { next[k] = 1; out.push([k, 1]); }
-      const has = (x, y, side) => x >= 0 && y >= 0 && x < L.TX && y < L.TY && (FEM.SIDES[next[x + y * L.TX]] & side);
-      for (const k of near) {
-        if (on.has(k) || !L.domain[k] || next[k]) continue;
-        const tx = k % L.TX, ty = (k - tx) / L.TX, l = has(tx - 1, ty, 2), r = has(tx + 1, ty, 1), b = has(tx, ty - 1, 8), t = has(tx, ty + 1, 4);
-        const fill = [l && b && 4, r && b && 5, r && t && 2, l && t && 3].filter(Boolean);   // Dreieck, das beide Seiten berührt
-        if (fill.length === 1) out.push([k, fill[0]]);
+      // r: Reihe quer zur Linie, m: Mitte längs, b: Zustand des Bands in der Kachel
+      let r, m, b;
+      if (o % 2 === 0) { r = o ? tx : ty; m = (o ? ty : tx) + 0.5; b = r >= c && r < c + w ? 1 : 0; }
+      else {
+        r = o === 1 ? tx - ty : tx + ty + 1; m = o === 1 ? tx + ty + 1 : tx - ty;
+        b = r === c ? (o === 1 ? 5 : 2) : r === c + w ? (o === 1 ? 3 : 4) : r > c && r < c + w ? 1 : 0;
       }
-      return { add, changes: out };
+      if (!b || m < l0 - 0.5 || m > l1 + 0.5) continue;
+      const s = st.solid[k], n = Q.indexOf(add ? Q[s] | Q[b] : Q[s] & ~Q[b]), ns = n < 0 ? (add ? 1 : 0) : n;
+      if (ns !== s) out.push([k, ns]);
     }
-    for (const k of on) if (L.domain[k] && !L.frozen[k] && next[k]) { next[k] = 0; out.push([k, 0]); }
-    const conn = FEM.attached(L, next);
-    for (const k of near) {
-      if (on.has(k) || next[k] !== 1 || !conn[k] || L.frozen[k]) continue;
-      const f = FEM.freeCorners(L, next, conn, k);
-      if (f.length === 1) out.push([k, f[0]]);
-    }
-    return { add, changes: out };
+    return out;
   }
   const lockedMsg = () => { $('verdict').innerHTML = '<p>Diese Kachel ist gesperrt: Hier sitzt ein Lager oder greift die Last an.</p>'; };
   // Ecke: Kachel und Ecke unter dem Zeiger (c: 0 unten links, 1 unten rechts, 2 oben rechts, 3 oben links),
@@ -1693,13 +1692,20 @@
     if (!editable()) return;
     const k = tileAt(e), L = st.L;
     if (k < 0) return;
-    if (st.tool === 'corner') {   // Klick schneidet beim Loslassen eine Ecke ab, Ziehen glättet alle Treppenstufen im Rechteck
+    if (st.tool === 'corner') {
       const h = cornerAt(e);
-      if (!h) return;
+      if (!h || !L.domain[k]) return;
+      if (L.frozen[k]) { lockedMsg(); return; }
+      const ns = cornerAction(k, h.c, h.inside);
+      if (ns === st.solid[k]) return;
+      e.preventDefault();
+      pushUndo(); st.solid[k] = ns; st.phase = 'design'; refresh();
+      return;
+    }
+    if (st.tool === 'line') {
       e.preventDefault();
       cv.setPointerCapture(e.pointerId);
-      const c = cell(e);
-      st.drag = { a: c, b: c, k, corner: h, p0: [e.clientX, e.clientY], p1: [e.clientX, e.clientY] };
+      st.drag = { line: true, p0: tilePt(e), p1: tilePt(e) };
       render();
       return;
     }
@@ -1713,7 +1719,7 @@
     setTile(k); refresh();
   });
   cv.addEventListener('pointermove', e => {
-    if (st.drag && st.drag.corner) { st.drag.p1 = [e.clientX, e.clientY]; render(); return; }
+    if (st.drag && st.drag.line) { st.drag.p1 = tilePt(e); render(); return; }
     if (st.drag) {
       const c = cell(e);
       if (c[0] !== st.drag.b[0] || c[1] !== st.drag.b[1]) { st.drag.b = c; render(); }
@@ -1737,11 +1743,8 @@
     const d = st.drag;
     st.drag = null;
     if (!d) { st.paint = null; return; }
-    if (d.corner) {
-      const L = st.L, click = isClick(d);
-      if (click && L.frozen[d.k]) { lockedMsg(); return render(); }
-      const changes = (click ? (L.domain[d.k] ? [[d.k, cornerAction(d.k, d.corner.c, d.corner.inside)]] : []) : lineChanges(d).changes)
-        .filter(([k, s]) => s !== st.solid[k]);
+    if (d.line) {
+      const changes = isClick(d) ? [] : lineChanges(d);
       if (!changes.length) return render();
       pushUndo();
       for (const [k, s] of changes) st.solid[k] = s;
@@ -1763,9 +1766,13 @@
   cv.addEventListener('pointerleave', () => { if (st.hover >= 0) { st.hover = -1; render(); } });
   addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
-    // R, P, E wählen das Werkzeug, solange nicht in ein Eingabefeld getippt wird
-    const tool = { r: 'rect', p: 'brush', e: 'corner' }[e.key.toLowerCase()];
-    if (tool && !e.metaKey && !e.ctrlKey && !e.altKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && st.phase !== 'edit') setTool(tool);
+    // R, P, E, L wählen das Werkzeug, solange nicht in ein Eingabefeld getippt wird;
+    // + und − schalten die Linie auf Hinzufügen oder Entfernen, 1 bis 3 wählen ihre Dicke (beides wählt auch die Linie)
+    if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || st.phase === 'edit') return;
+    const key = e.key.toLowerCase(), tool = { r: 'rect', p: 'brush', e: 'corner', l: 'line' }[key];
+    if (tool) setTool(tool);
+    else if (key === '+' || key === '-') setLine({ add: key === '+' });
+    else if (key === '1' || key === '2' || key === '3') setLine({ w: +key });
   });
 
   const setTool = t => {
@@ -1773,10 +1780,24 @@
     $('t-rect').setAttribute('aria-pressed', String(t === 'rect'));
     $('t-brush').setAttribute('aria-pressed', String(t === 'brush'));
     $('t-corner').setAttribute('aria-pressed', String(t === 'corner'));
+    $('t-line').setAttribute('aria-pressed', String(t === 'line'));
+    $('lopts').hidden = t !== 'line';
   };
+  // Linie einstellen: add (hinzufügen statt entfernen), w (Dicke 1 bis 3)
+  function setLine({ add, w }) {
+    if (add != null) st.lineAdd = add;
+    if (w) st.lineW = w;
+    setTool('line');
+    for (const b of $('lopts').querySelectorAll('[data-w]')) b.setAttribute('aria-pressed', String(+b.dataset.w === st.lineW));
+    controls();
+  }
   $('t-rect').onclick = () => setTool('rect');
   $('t-brush').onclick = () => setTool('brush');
   $('t-corner').onclick = () => setTool('corner');
+  $('t-line').onclick = () => setTool('line');
+  $('l-cut').onclick = () => setLine({ add: false });
+  $('l-add').onclick = () => setLine({ add: true });
+  for (const b of $('lopts').querySelectorAll('[data-w]')) b.onclick = () => setLine({ w: +b.dataset.w });
   $('b-submit').onclick = submit;
   $('b-probe').onclick = probe;
   $('b-undo').onclick = undo;
