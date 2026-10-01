@@ -260,12 +260,13 @@
   // Vorschau beim Aufziehen: so sieht es nach dem Loslassen aus
   function drawDrag() {
     const d = st.drag, s = G.s, set = new Uint8Array(st.L.nT);
-    if (d.corner) {   // Linie: was wegfällt, ganze Kacheln und abgeschnittene Dreiecke, dazu die Linie selbst
+    if (d.corner) {   // Linie: was dazukommt oder wegfällt (ganze Kacheln und Dreiecke), dazu die Linie selbst
       if (isClick(d)) return;
-      for (const [k, ns] of lineChanges(d)) set[k] = ns ? (ns - 2 + 2) % 4 + 2 : st.solid[k];
+      const { add, changes } = lineChanges(d);
+      for (const [k, ns] of changes) set[k] = add ? ns : ns ? (ns - 2 + 2) % 4 + 2 : st.solid[k];
       const b = cv.getBoundingClientRect();
       ctx.save();
-      ctx.globalAlpha = 0.75; ctx.fillStyle = C.sheet; tilesPath(set); ctx.fill();
+      ctx.globalAlpha = 0.75; ctx.fillStyle = add ? C.steel : C.sheet; tilesPath(set); ctx.fill();
       ctx.globalAlpha = 1; ctx.setLineDash([6, 4]); ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(d.p0[0] - b.left, d.p0[1] - b.top); ctx.lineTo(d.p1[0] - b.left, d.p1[1] - b.top); ctx.stroke();
       ctx.restore();
@@ -1627,31 +1628,44 @@
       }
     return out;
   }
-  // Linie mit „Ecke“: Kacheln unter der Linie fallen weg, danach verlieren angrenzende volle Kacheln mit genau einer freien
-  // Ecke diese Ecke (alle auf einmal). Quer durchs Material wird so ein glatter schräger Schlitz, entlang einer Treppenkante
-  // im Freien gezogen wird die Kante glatt. Ergebnis: Liste [Kachel, neuer Zustand].
+  // Linie mit „Ecke“, wie Rechteck und Pinsel je nach Start:
+  // Beginnt sie auf Material, fallen die Kacheln darunter weg, und angrenzende volle Kacheln mit genau einer freien Ecke
+  // verlieren diese Ecke: ein glatter schräger Schlitz. Beginnt sie auf einer leeren Kachel (nicht bei offenen Karten),
+  // werden die Kacheln darunter voll, und leere Nachbarn mit Material an genau zwei angrenzenden Seiten bekommen das
+  // Dreieck in diese Ecke: ein glatter schräger Steg. Ergebnis: { add, changes: [[Kachel, neuer Zustand], ...] }.
   const isClick = d => Math.hypot(d.p1[0] - d.p0[0], d.p1[1] - d.p0[1]) < G.s * 0.3;
   function lineChanges(d) {
-    const L = st.L, on = new Set(), [x0, y0] = d.p0, [x1, y1] = d.p1;
+    const L = st.L, on = new Set(), [x0, y0] = d.p0, [x1, y1] = d.p1, add = !st.open && L.domain[d.k] && !st.solid[d.k];
     const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (G.s / 4)));
     for (let i = 0; i <= n; i++) {
       const k = tileAt({ clientX: x0 + (x1 - x0) * i / n, clientY: y0 + (y1 - y0) * i / n });
       if (k >= 0) on.add(k);
     }
     const next = st.solid.slice(), out = [], near = new Set();
-    for (const k of on) if (L.domain[k] && !L.frozen[k] && next[k]) { next[k] = 0; out.push([k, 0]); }
-    const conn = FEM.attached(L, next);
     for (const k of on) {
       const tx = k % L.TX, ty = (k - tx) / L.TX;
       for (let y = Math.max(0, ty - 1); y <= Math.min(L.TY - 1, ty + 1); y++)
         for (let x = Math.max(0, tx - 1); x <= Math.min(L.TX - 1, tx + 1); x++) near.add(x + y * L.TX);
     }
+    if (add) {
+      for (const k of on) if (L.domain[k] && next[k] !== 1) { next[k] = 1; out.push([k, 1]); }
+      const has = (x, y, side) => x >= 0 && y >= 0 && x < L.TX && y < L.TY && (FEM.SIDES[next[x + y * L.TX]] & side);
+      for (const k of near) {
+        if (on.has(k) || !L.domain[k] || next[k]) continue;
+        const tx = k % L.TX, ty = (k - tx) / L.TX, l = has(tx - 1, ty, 2), r = has(tx + 1, ty, 1), b = has(tx, ty - 1, 8), t = has(tx, ty + 1, 4);
+        const fill = [l && b && 4, r && b && 5, r && t && 2, l && t && 3].filter(Boolean);   // Dreieck, das beide Seiten berührt
+        if (fill.length === 1) out.push([k, fill[0]]);
+      }
+      return { add, changes: out };
+    }
+    for (const k of on) if (L.domain[k] && !L.frozen[k] && next[k]) { next[k] = 0; out.push([k, 0]); }
+    const conn = FEM.attached(L, next);
     for (const k of near) {
       if (on.has(k) || next[k] !== 1 || !conn[k] || L.frozen[k]) continue;
       const f = FEM.freeCorners(L, next, conn, k);
       if (f.length === 1) out.push([k, f[0]]);
     }
-    return out;
+    return { add, changes: out };
   }
   const lockedMsg = () => { $('verdict').innerHTML = '<p>Diese Kachel ist gesperrt: Hier sitzt ein Lager oder greift die Last an.</p>'; };
   // Ecke: Kachel und Ecke unter dem Zeiger (c: 0 unten links, 1 unten rechts, 2 oben rechts, 3 oben links),
@@ -1726,7 +1740,7 @@
     if (d.corner) {
       const L = st.L, click = isClick(d);
       if (click && L.frozen[d.k]) { lockedMsg(); return render(); }
-      const changes = (click ? (L.domain[d.k] ? [[d.k, cornerAction(d.k, d.corner.c, d.corner.inside)]] : []) : lineChanges(d))
+      const changes = (click ? (L.domain[d.k] ? [[d.k, cornerAction(d.k, d.corner.c, d.corner.inside)]] : []) : lineChanges(d).changes)
         .filter(([k, s]) => s !== st.solid[k]);
       if (!changes.length) return render();
       pushUndo();
