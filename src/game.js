@@ -1317,6 +1317,7 @@
   function playerMine() {
     stopBoard();
     Object.assign(mp, { all: false, zoom: null });
+    st.animId++; st.busy = false;   // laufende Animation der großen Ansicht anhalten
     const r = mp.own;
     if (r) {
       st.solid = r.solid.slice(); st.conn = r.conn; st.res = r;
@@ -1391,18 +1392,19 @@
   // Große Ansicht eines Entwurfs, sobald alle aufgedeckt sind: das FEM-Ergebnis wie im Einzelspiel, Schriftfeld dazu
   function zoomTo(i) {
     const n = mp.order ? mp.order.length : 0;
-    if (!boardOn() || !n || mp.shown < n || st.busy) return;
+    if (!boardOn() || !n || mp.shown < n) return;
     mp.zoom = (i + n) % n;
-    const e = mp.order[mp.zoom], r = e.res;
-    st.solid = e.solid.slice(); st.conn = r.conn; st.res = r;
-    st.view = { mode: 'result', res: r, solid: st.solid, scale: r.disp ? niceScale(r) : 0, t: 0 };
-    showFem(r, st.view.scale);
-    $('stamp').hidden = true;
-    panel(); controls(); mpRender(); render();
+    const e = mp.order[mp.zoom];
+    st.solid = e.solid.slice(); st.conn = e.res.conn;
+    // aufdecken wie im Einzelspiel: Farben, Durchbiegung, bei Versagen fällt das Bauteil zusammen; Blättern bricht ab.
+    // Statt des Stempels erscheint danach das Urteil in der Kopfzeile.
+    runReveal(() => { $('stamp').hidden = true; mpRender(); });
+    mpRender();
   }
   function zoomEnd() {
     if (mp.zoom == null) return;
     mp.zoom = null;
+    st.animId++; st.busy = false;   // laufende Animation anhalten
     $('legend').hidden = true; $('femline').textContent = '';
     controls(); mpRender();
   }
@@ -1558,7 +1560,7 @@
       <button class="btn" type="button" data-act="end">Spiel beenden</button>`,
     'h-zoom': () => `<p class="mp-net" id="mp-net"></p>
       <p id="mp-zoom"></p>
-      <div class="actions">
+      <div class="row2">
         <button class="btn" type="button" data-act="zprev">Vorheriger</button>
         <button class="btn" type="button" data-act="znext">Nächster</button>
       </div>
@@ -1713,8 +1715,9 @@
     $('zoomhead').hidden = scr !== 'h-zoom' && scr !== 'p-zoom';
     if (scr === 'h-zoom' || scr === 'p-zoom') {
       const e = mp.order[mp.zoom], r = e.res;
-      set('zoomhead', `<span class="nm">${esc(e.name)}</span> <span class="${e.ok ? 't-ok' : 't-bad'}">${e.ok ? 'Hält' : 'Hält nicht'}</span>` +
-        `<span class="zs">${fmt(e.rem, 1)} % entfernt. ${e.ok ? `Max. Auslastung ${fmt(100 * r.maxUtil)} %.` : failWhy(r)}</span>`);
+      const w = st.busy ? ' wait' : '';   // Urteil erst nach der Animation
+      set('zoomhead', `<span class="nm">${esc(e.name)}</span> <span class="${e.ok ? 't-ok' : 't-bad'}${w}">${e.ok ? 'Hält' : 'Hält nicht'}</span>` +
+        `<span class="zs">${fmt(e.rem, 1)} % entfernt.<span class="${w}"> ${e.ok ? `Max. Auslastung ${fmt(100 * r.maxUtil)} %.` : failWhy(r)}</span></span>`);
       set('mp-zoom', `Entwurf ${mp.zoom + 1} von ${mp.order.length}. Pfeiltasten blättern, Esc zeigt wieder alle.`);
     }
     panel();
