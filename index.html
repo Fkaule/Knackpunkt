@@ -1090,6 +1090,10 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   let soloOpen = false;
   // Herausforderung per Link: { key (Bauteil), open, pct10 (entfernte Prozent mal 10), name, part (Argumente für loadLevel) }
   let duel = null;
+  // Kursmodus (?kurs): eingebettet in die Kursseite, nur das verlinkte Bauteil, blind, ohne Herausforderung.
+  // Gehaltene Runden ohne Live-Spannungen gehen per postMessage an die Kursseite (Bestenliste dort).
+  const KURS = new URLSearchParams(location.search).has('kurs');
+  const KURS_NAME = (new URLSearchParams(location.search).get('kurs') || '').replace(/[<>&"]/g, '').slice(0, 40);   // ?kurs=Lenker
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
     eso: {}, esoRun: null, animId: 0, busy: false };
@@ -1562,7 +1566,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       : st.probes ? `${st.probes} übrig` : mp.on ? 'keine übrig' : 'verbraucht';
     const rid = mp.role === 'host' ? mp.g.rid : mp.rid;
     $('tb-sheet').textContent = mp.on ? (rid ? `Runde ${rid}` : 'Warteraum')
-      : st.li === RANDOM ? 'Zufallsbauteil' : st.li === CUSTOM ? 'Baukasten' : `${st.li + 1} von ${LEVELS.length}`;
+      : st.li === RANDOM ? 'Zufallsbauteil' : st.li === CUSTOM ? (KURS ? 'Übung' : 'Baukasten') : `${st.li + 1} von ${LEVELS.length}`;
   }
 
   function controls() {
@@ -1583,7 +1587,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     $('b-probe').hidden = $('b-undo').hidden = $('b-reset').hidden = st.open;
     $('live-row').hidden = st.open || edit || !!duel;   // in einer Herausforderung keine Live-Spannungen
     // herausfordern nur mit einem gehaltenen Ergebnis, das ohne Live-Spannungen entstanden ist
-    $('b-duel').hidden = mp.on || st.phase !== 'result' || !st.res || !st.res.ok || st.practice;
+    $('b-duel').hidden = KURS || mp.on || st.phase !== 'result' || !st.res || !st.res.ok || st.practice;
     if (st.phase !== 'result') $('share').hidden = true;
     const openRules = st.open || (mp.role === 'host' && mp.g.mo === 'o');   // der Beamer erklärt die Regeln der laufenden Runde
     const zoom = mp.zoom != null;   // große Ansicht nach der Auflösung: keine Regeltexte
@@ -1632,6 +1636,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   function loadLevel(i, arg) {
     st.animId++;
     const def = i === RANDOM ? PARTS.generate(arg) : i === CUSTOM ? PARTS.fromCode(arg) || LEVELS[0] : LEVELS[i];
+    if (KURS && KURS_NAME && i === CUSTOM) Object.assign(def, { name: KURS_NAME, note: 'Aus der Übung nachgebaut. Nehmen Sie so viel Material weg, wie es geht.' });
     st.li = i; st.def = def; st.key = def.nr ? 'z' + def.nr : def.code ? 'b' + def.code : i; st.L = FEM.level(def);
     if (duel && duel.key !== partKey()) duel = null;   // anderes Bauteil beendet die Herausforderung
     st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
@@ -1765,8 +1770,19 @@ if (typeof module !== 'undefined') module.exports = PARTS;
         : er - rem <= 5 ? 'Knapp dran.' : 'Da geht noch was.';
       h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${fmt(100 * e.res.maxUtil)} %. ${cmp}</p>`;
     }
+    if (KURS && st.practice) h += '<p>Mit Live-Spannungen gespielt: zählt nicht für die Bestenliste. „Neuer Versuch“ ohne Häkchen zählt wieder.</p>';
     $('verdict').innerHTML = h;
     duelRender();
+    kursMelden();
+  }
+
+  // Kursmodus: gehaltenes Ergebnis einmal an die Kursseite melden
+  function kursMelden() {
+    const r = st.res;
+    if (!KURS || mp.on || st.open || st.practice || !r || !r.ok || st.phase !== 'result' || st.gemeldet === r) return;
+    st.gemeldet = r;
+    const prozent = Math.round(removedPct(st.L, r.solid, r.conn) * 10) / 10;
+    parent.postMessage({ typ: 'knackpunkt-ergebnis', teil: partKey(), prozent, entwurf: encode(r.solid) }, '*');
   }
 
   // ---------- Herausforderung ----------
@@ -3154,6 +3170,14 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   if (document.fonts) document.fonts.ready.then(render);
 
   readColors();
+  if (KURS) {
+    document.documentElement.classList.add('kurs');
+    for (const el of [document.querySelector('.top .nav'), $('g-blind').parentElement, $('b-next'), $('share')]) el.hidden = true;
+    // Höhe an die Kursseite melden, damit der Rahmen ohne eigenen Scrollbalken passt
+    const hoehe = () => parent.postMessage({ typ: 'knackpunkt-hoehe', h: document.documentElement.scrollHeight }, '*');
+    new ResizeObserver(hoehe).observe(document.body);
+    hoehe();
+  }
   // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen)
   const hash = location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
   duel = parseDuel(hash);
