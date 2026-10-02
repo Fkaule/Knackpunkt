@@ -280,7 +280,7 @@ Nach einer Runde allein, die hält und ohne Live-Spannungen gespielt wurde, erze
 - Blind: Die Spielleitung legt je Runde fest, wie viele Probe-Rechnungen jede Person hat (0 bis 5); der Beamer zeigt die verbrauchten Proben
 - Offene Karten: Der Beamer zeigt live, wie viel jede Person schon entfernt hat, grün heißt aufgehört, rot heißt Bruch. Wer bricht, ist in dieser Runde raus
 - Ende der Zeit gibt automatisch ab; die FEM rechnet alle Entwürfe bei der Spielleitung, Punkte = entfernte Prozent, wenn es hält, sonst 0
-- Auflösung am Beamer: Die Entwürfe werden nacheinander aufgedeckt, unter jedem steht „Hält“ oder „Hält nicht“. Danach zeigt ein Klick auf einen Entwurf (oder die Pfeiltasten) sein FEM-Ergebnis groß, mit Verformung, Spannungen und Schriftfeld; Esc führt zurück zur Übersicht
+- Auflösung am Beamer: Die Entwürfe werden nacheinander aufgedeckt. Auf jede Karte schlägt dabei ein Stempel „Hält“ oder „Hält nicht“, der danach klein in die Zeile unter die Zeichnung wandert, damit in der Übersicht alle Strukturen frei bleiben. Danach zeigt ein Klick auf einen Entwurf (oder die Pfeiltasten) sein FEM-Ergebnis groß, mit Verformung, Spannungen und Schriftfeld; Esc führt zurück zur Übersicht
 
 ## Deploy mit Docker
 

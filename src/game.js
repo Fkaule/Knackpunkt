@@ -1338,7 +1338,23 @@
       const vd = card.querySelector('.vd');
       vd.textContent = !open ? '' : e.ok ? 'Hält' : 'Hält nicht';
       vd.className = 'vd' + (!open ? '' : e.ok ? ' ok' : ' bad');
+      if (open && !redraw && !reduce) stampCard(card, e.ok);
     }
+  }
+  // Aufdecken: Stempel „Hält“ oder „Hält nicht“ schlägt auf die Karte und wandert dann klein in die Zeile darunter,
+  // damit in der Übersicht die Zeichnung frei bleibt
+  function stampCard(card, ok) {
+    const pic = card.querySelector('.pic'), vd = card.querySelector('.vd'), s = document.createElement('div');
+    s.className = 'cstamp ' + (ok ? 'ok' : 'bad');
+    s.textContent = ok ? 'Hält' : 'Hält nicht';
+    pic.appendChild(s);
+    const a = s.getBoundingClientRect(), b = vd.getBoundingClientRect();
+    s.style.setProperty('--dx', `${b.left + b.width / 2 - a.left - a.width / 2}px`);
+    s.style.setProperty('--dy', `${b.top + b.height / 2 - a.top - a.height / 2}px`);
+    vd.classList.add('late');
+    const done = () => { s.remove(); vd.classList.remove('late'); };
+    s.addEventListener('animationend', done);
+    setTimeout(done, 1600);   // falls die Animation nicht zu Ende läuft, etwa im Hintergrund-Tab
   }
   // Große Ansicht eines Entwurfs, sobald alle aufgedeckt sind: das FEM-Ergebnis wie im Einzelspiel, Schriftfeld dazu
   function zoomTo(i) {
@@ -1532,7 +1548,7 @@
     // Karten im Raster mit etwa Wurzel aus der Anzahl Spalten: wenige Entwürfe werden groß
     'h-reveal': () => `<h2>Runde ${mp.g.rid}: ${esc(partName(st.def))}</h2>
       <div class="cards" id="mp-cards" style="--cols: ${Math.ceil(Math.sqrt((mp.order || []).length)) || 1}">${(mp.order || []).map((e, i) =>
-        `<div class="card" data-act="zoom" data-i="${i}"><canvas></canvas>` +
+        `<div class="card" data-act="zoom" data-i="${i}"><div class="pic"><canvas></canvas></div>` +
         `<div class="cap"><span class="nm">${esc(e.name)}</span><span class="vd"></span></div><div class="vl"></div></div>`).join('')}</div>
       <div class="split" id="mp-final"></div>`,
   };

@@ -123,13 +123,28 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .cards { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 600px) { .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
 .card { position: relative; display: grid; gap: 4px; padding: 8px; border: 1.5px solid var(--rule); background: var(--sheet); min-width: 0; }
+.card .pic { position: relative; container-type: inline-size; }
 .card canvas { width: 100%; cursor: inherit; touch-action: auto; }
 .card .cap { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; font-size: clamp(14px, 1.4vw, 18px); }
 .card .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.card .vd { font-weight: 700; white-space: nowrap; }
+.card .vd { font-weight: 700; white-space: nowrap; transition: opacity 0.25s; }
+.card .vd.late { opacity: 0; }
 .card .vd.ok { color: var(--ok); }
 .card .vd.bad { color: var(--bad); }
 .card .vl { font: 500 13px var(--f-mono); color: var(--ink2); min-height: 1.3em; }
+/* Aufdecken: der Stempel schlägt auf die Karte und wandert klein in die Zeile darunter (--dx, --dy setzt das Spiel) */
+.cstamp { position: absolute; left: 50%; top: 50%; pointer-events: none; white-space: nowrap;
+  font: 800 28px/1 var(--f-display); font-size: clamp(14px, 10cqw, 52px); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 0.12em 0.35em 0.05em; border: 0.1em solid currentColor; border-radius: 6px; background: var(--sheet);
+  animation: cstamp 1.4s cubic-bezier(0.2, 0.9, 0.3, 1.25) both; }
+.cstamp.ok { color: var(--ok); }
+.cstamp.bad { color: var(--bad); }
+@keyframes cstamp {
+  0% { transform: translate(-50%, -50%) rotate(-8deg) scale(2.3); opacity: 0; }
+  20% { transform: translate(-50%, -50%) rotate(-8deg) scale(1); opacity: 0.95; }
+  62% { transform: translate(-50%, -50%) rotate(-8deg) scale(1); opacity: 0.95; animation-timing-function: ease-in; }
+  100% { transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, 0px))) rotate(0deg) scale(0.35); opacity: 0; }
+}
 .cards.all .card { cursor: zoom-in; }
 .cards.all .card:hover { border-color: var(--ink); }
 .zoomhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font: 800 clamp(24px, 3vw, 34px)/1.1 var(--f-display); letter-spacing: 0.02em; }
@@ -2314,7 +2329,23 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       const vd = card.querySelector('.vd');
       vd.textContent = !open ? '' : e.ok ? 'Hält' : 'Hält nicht';
       vd.className = 'vd' + (!open ? '' : e.ok ? ' ok' : ' bad');
+      if (open && !redraw && !reduce) stampCard(card, e.ok);
     }
+  }
+  // Aufdecken: Stempel „Hält“ oder „Hält nicht“ schlägt auf die Karte und wandert dann klein in die Zeile darunter,
+  // damit in der Übersicht die Zeichnung frei bleibt
+  function stampCard(card, ok) {
+    const pic = card.querySelector('.pic'), vd = card.querySelector('.vd'), s = document.createElement('div');
+    s.className = 'cstamp ' + (ok ? 'ok' : 'bad');
+    s.textContent = ok ? 'Hält' : 'Hält nicht';
+    pic.appendChild(s);
+    const a = s.getBoundingClientRect(), b = vd.getBoundingClientRect();
+    s.style.setProperty('--dx', `${b.left + b.width / 2 - a.left - a.width / 2}px`);
+    s.style.setProperty('--dy', `${b.top + b.height / 2 - a.top - a.height / 2}px`);
+    vd.classList.add('late');
+    const done = () => { s.remove(); vd.classList.remove('late'); };
+    s.addEventListener('animationend', done);
+    setTimeout(done, 1600);   // falls die Animation nicht zu Ende läuft, etwa im Hintergrund-Tab
   }
   // Große Ansicht eines Entwurfs, sobald alle aufgedeckt sind: das FEM-Ergebnis wie im Einzelspiel, Schriftfeld dazu
   function zoomTo(i) {
@@ -2508,7 +2539,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     // Karten im Raster mit etwa Wurzel aus der Anzahl Spalten: wenige Entwürfe werden groß
     'h-reveal': () => `<h2>Runde ${mp.g.rid}: ${esc(partName(st.def))}</h2>
       <div class="cards" id="mp-cards" style="--cols: ${Math.ceil(Math.sqrt((mp.order || []).length)) || 1}">${(mp.order || []).map((e, i) =>
-        `<div class="card" data-act="zoom" data-i="${i}"><canvas></canvas>` +
+        `<div class="card" data-act="zoom" data-i="${i}"><div class="pic"><canvas></canvas></div>` +
         `<div class="cap"><span class="nm">${esc(e.name)}</span><span class="vd"></span></div><div class="vl"></div></div>`).join('')}</div>
       <div class="split" id="mp-final"></div>`,
   };
