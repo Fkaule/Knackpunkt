@@ -561,6 +561,7 @@
     $('live').disabled = !design || st.busy;
     $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = $('t-line').disabled = !design || st.busy;
     $('ledit').hidden = !(edit && ed.tool === 'last' && ed.loads.length);   // Baukasten: Richtung und Betrag der gewählten Last
+    $('ed-live-row').hidden = !edit;
     for (const b of $('lopts').querySelectorAll('button')) b.disabled = !design || st.busy || (b.id === 'l-add' && st.open);
     $('l-add').setAttribute('aria-pressed', String(lineAdds())); $('l-cut').setAttribute('aria-pressed', String(!lineAdds()));
     cv.classList.toggle('locked', !design);
@@ -810,7 +811,9 @@
   // Raster mit Material; Einspannungen, Lager und Lasten hängen an Außenkanten, Schlüssel "x,y,Seite".
   // loads: [{ keys, deg, kn }], sel: gewählte Last, auto: alle Lasten gleich groß und automatisch bemessen
   const ED_TX = 24, ED_TY = 16;
-  const ed = { cells: null, walls: new Set(), pins: new Map(), loads: [], sel: -1, auto: true, tool: 'form', drag: null, hover: null, raw: null, res: null };
+  // live: FE-Rechnung beim Bauen zeigen (je Gerät gemerkt), fe: deren Ergebnis für das Vollteil
+  const ed = { cells: null, walls: new Set(), pins: new Map(), loads: [], sel: -1, auto: true, tool: 'form', drag: null, hover: null, raw: null, res: null,
+    live: store.get('edlive') === true, fe: null };
   const vert = side => side === 'left' || side === 'right';
   const edHas = (x, y) => x >= 0 && y >= 0 && x < ED_TX && y < ED_TY && ed.cells[x + y * ED_TX] === 1;
   const edFree = key => { const [x, y, side] = key.split(','), [dx, dy] = OUT[side]; return edHas(+x, +y) && !edHas(+x + dx, +y + dy); };
@@ -831,6 +834,7 @@
     if (!ed.cells || st.li !== CUSTOM) edFrom(st.def);
     Object.assign(st, { li: CUSTOM, phase: 'edit', busy: false, drag: null, paint: null, hover: -1 });
     $('stamp').hidden = true; $('legend').hidden = true; $('femline').textContent = '';
+    $('ed-live').checked = ed.live;
     document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === CUSTOM)));
     edUpdate();
   }
@@ -903,11 +907,17 @@
       view.loads.forEach((l, i) => { l.len = Math.max(0.8, 2.2 * ed.loads[i].kn / top); });
     }
     st.def = view; st.L = FEM.level(view); st.solid = ed.cells;
+    edFe();
     const ready = d && (ed.auto ? `${ed.loads.length > 1 ? 'Die Lasten sind' : 'Die Last ist'} so bemessen, dass das Vollteil zu ${fmt(100 * d.util)} % ausgelastet ist.`
       : `Das Vollteil ist zu ${fmt(100 * d.util)} % ausgelastet.`);
     $('verdict').innerHTML = `<p>${d ? `<span class="t-ok">Bereit.</span> ${ready} „Spielen“ startet den Entwurf.` : ED_MSG[ed.res.error]}</p>`;
     ledRender();
     layout(); panel(); controls(); render();
+  }
+  // FE-Rechnung live (wahlweise): das Vollteil rechnen, sobald Lager und Lasten mit bekanntem Betrag da sind
+  function edFe() {
+    ed.fe = ed.live && ed.loads.length && (ed.walls.size || ed.pins.size) && !(ed.auto && !ed.res.def) ? FEM.analyze(st.L, ed.cells) : null;
+    if (ed.fe) showFem(ed.fe, 0); else { $('legend').hidden = true; $('femline').textContent = ''; }
   }
   // Feld für die gewählte Last: Nummer, Richtung, Betrag (bei Automatik nur zur Anzeige)
   function ledRender() {
@@ -935,7 +945,8 @@
     ctx.lineWidth = 1; ctx.strokeStyle = C.grid; ctx.beginPath();   // alle Kacheln, damit man sieht, wo Material hin kann
     for (let k = 0; k < L.nT; k++) { const [x, y] = tileRect(k); ctx.rect(x + 0.5, y + 0.5, s - 1, s - 1); }
     ctx.stroke();
-    drawBlind(ed.cells, ed.cells, false);
+    if (ed.fe && ed.fe.disp) drawResult({ mode: 'result', res: ed.fe, solid: ed.cells, scale: 0 });   // Kacheln nach Auslastung
+    else drawBlind(ed.cells, ed.cells, false);
     const d = ed.drag;
     if (d && ed.tool === 'form') {
       const x0 = Math.min(d.a[0], d.b[0]), x1 = Math.max(d.a[0], d.b[0]), y0 = Math.min(d.a[1], d.b[1]), y1 = Math.max(d.a[1], d.b[1]);
@@ -1051,6 +1062,7 @@
         const f = kn * 1000 / Math.hypot(vl.fx, vl.fy);
         l.kn = kn; vl.fx *= f; vl.fy *= f; vl.len = kn / d.k; delete vl.unknown;
         ed.auto = false;   // gezogener Betrag gilt, die Automatik ist damit aus
+        if (ed.live) { st.L = FEM.level(st.def); edFe(); }   // Spannungen wachsen beim Ziehen mit
         ledRender(); render();
       }
       return;
@@ -1101,6 +1113,7 @@
     edUpdate();
   };
   $('l-auto').onchange = () => { ed.auto = $('l-auto').checked; edUpdate(); };
+  $('ed-live').onchange = () => { ed.live = $('ed-live').checked; store.set('edlive', ed.live); edUpdate(); };
   $('l-del').onclick = () => { ed.loads.splice(ed.sel, 1); ed.sel = ed.loads.length - 1; edUpdate(); };
 
   // ---------- Wettkampf: Verbindung ----------
