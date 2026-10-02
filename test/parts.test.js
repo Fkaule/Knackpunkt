@@ -25,26 +25,35 @@ test("Zufallsbauteile: Vollteil hält, zu 45 bis 65 % ausgelastet, Lager und Las
   }
 });
 
-test("Baukasten: Code hin und zurück, Kragarm wie das feste Bauteil bemessen", () => {
+test("Baukasten: Code hin und zurück, mehrere Lasten mit Richtung und Betrag, alte Links weiter gültig", () => {
+  const kN = l => Math.round(Math.hypot(l.fx, l.fy)) / 1000, deg = l => Math.round(Math.atan2(l.fy, l.fx) * 180 / Math.PI);
   const raw = { tx: 16, ty: 8, cells: new Uint8Array(128).fill(1),
     supports: [{ kind: "wand", side: "left", tiles: Array.from({ length: 8 }, (_, y) => [0, y]) }],
-    load: { side: "right", tiles: [[15, 3], [15, 4]], deg: -90 } };
+    loads: [{ side: "right", tiles: [[15, 3], [15, 4]], deg: -90, kn: 10 }, { side: "top", tiles: [[8, 7]], deg: -45, kn: 2.5 }] };
   const d = PARTS.fromCode(PARTS.encode(raw));
   assert.ok(d);
-  assert.strictEqual(Math.round(Math.hypot(d.loads[0].fx, d.loads[0].fy)), 10000);
+  assert.deepStrictEqual(d.loads.map(l => [kN(l), deg(l)]), [[10, -90], [2.5, -45]]);
+  assert.deepStrictEqual(d.loads[1].tiles, [[8, 7]]);
   assert.deepStrictEqual(d.supports[0].tiles, raw.supports[0].tiles);
-  for (const bad of ["", "1g8.x.wL008.Rf326", "1g8._____________________w.wL008.Rf329", "1g8._____________________w.fL008.Rf326"])
+  // automatisch: alle Lasten gleich groß, eine Last am Kragarm wie beim festen Bauteil
+  assert.deepStrictEqual(PARTS.build({ ...raw, auto: true }).def.loads.map(kN), [6, 6]);
+  assert.strictEqual(kN(PARTS.build({ ...raw, loads: raw.loads.slice(0, 1), auto: true }).def.loads[0]), 10);
+  // Link aus Version 1 (eine Last ohne Betrag) wird wie bisher bemessen
+  assert.strictEqual(kN(PARTS.fromCode("1g8._____________________w.wL008.Rf326").loads[0]), 10);
+  for (const bad of ["", "1g8.x.wL008.Rf326", "1g8._____________________w.wL008.Rf329", "1g8._____________________w.fL008.Rf326",
+    "2g8._____________________w.wL008.Rf326", "2g8._____________________w.wL008.Rf3260", "2g8._____________________w.wL008.Rf326zz"])
     assert.strictEqual(PARTS.fromCode(bad), null, bad);
 });
 
 test("Baukasten: verständliche Gründe, wenn etwas fehlt", () => {
   const base = { tx: 4, ty: 2, cells: new Uint8Array(8).fill(1),
-    supports: [{ kind: "wand", side: "left", tiles: [[0, 0], [0, 1]] }], load: { side: "right", tiles: [[3, 1]], deg: -90 } };
+    supports: [{ kind: "wand", side: "left", tiles: [[0, 0], [0, 1]] }], loads: [{ side: "right", tiles: [[3, 1]], deg: -90, kn: 1 }], auto: true };
   assert.ok(PARTS.build(base).def);
   assert.strictEqual(PARTS.build({ ...base, cells: new Uint8Array(8) }).error, "leer");
   assert.strictEqual(PARTS.build({ ...base, cells: Uint8Array.from([1, 0, 1, 1, 1, 0, 1, 1]) }).error, "zerfallen");
   assert.strictEqual(PARTS.build({ ...base, supports: [] }).error, "lager");
-  assert.strictEqual(PARTS.build({ ...base, load: null }).error, "last");
+  assert.strictEqual(PARTS.build({ ...base, loads: [] }).error, "last");
   assert.strictEqual(PARTS.build({ ...base, supports: [{ kind: "los", side: "bottom", tiles: [[0, 0]] }] }).error, "beweglich");
-  assert.strictEqual(PARTS.build({ ...base, load: { side: "left", tiles: [[1, 1]], deg: -90 } }).error, "kante");
+  assert.strictEqual(PARTS.build({ ...base, loads: [{ side: "left", tiles: [[1, 1]], deg: -90, kn: 1 }] }).error, "kante");
+  assert.strictEqual(PARTS.build({ ...base, loads: [{ side: "right", tiles: [[3, 1]], deg: -90, kn: 100 }], auto: false }).error, "voll");
 });

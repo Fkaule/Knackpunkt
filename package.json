@@ -1,6 +1,6 @@
 {
   "name": "knackpunkt",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "FEM-Minispiel: Material entfernen, bis das Bauteil versagt, allein oder als Wettkampf",
   "scripts": {

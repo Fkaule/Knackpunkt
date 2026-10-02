@@ -87,6 +87,14 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .t-ok { color: var(--ok); font-weight: 700; }
 .t-bad { color: var(--bad); font-weight: 700; }
 .live { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--ink2); cursor: pointer; }
+/* Baukasten: Richtung und Betrag der gewählten Last */
+.ledit { display: grid; gap: 8px; border: 1.5px solid var(--rule); padding: 10px; }
+.ledit p { margin: 0; font-weight: 600; }
+.dirs { display: grid; grid-template-columns: repeat(3, 42px); gap: 4px; }
+.dirs button { font: 600 18px/1 var(--f-body); height: 36px; color: var(--ink); background: transparent; border: 1.5px solid var(--rule);
+  border-radius: 2px; cursor: pointer; }
+.dirs button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--sheet); }
+.dirs button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .rules { font-size: 14px; color: var(--ink2); }
 .rules summary { cursor: pointer; font-weight: 600; color: var(--ink); }
 .rules ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; }
@@ -193,7 +201,8 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
             <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
-            <b>Last</b> per Klick auf eine Außenkante setzen, jeder weitere Klick dreht sie um 45°. Wie groß die Last ist, rechnet das Spiel aus. Beim Spielen steht das Bauteil im Link der Seite.</p>
+            <b>Last</b>: Ein Klick auf eine freie Außenkante setzt eine weitere Last, Ziehen verteilt sie über mehrere Kacheln. Ein Klick auf eine Last wählt sie aus, ein zweiter dreht sie um 45°.
+            Richtung und Betrag der gewählten Last stellen Sie rechts ein; mit „Beträge automatisch“ werden alle Lasten gleich groß und so bemessen, dass das Vollteil zu gut 50 % ausgelastet ist. Beim Spielen steht das Bauteil im Link der Seite.</p>
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
             <button type="button" id="t-rect" aria-pressed="true" title="Taste R">Rechteck</button>
             <button type="button" id="t-brush" aria-pressed="false" title="Taste P">Pinsel</button>
@@ -256,6 +265,17 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
         <div class="actions" id="act-edit" hidden>
           <button class="btn primary" id="b-play" type="button">Spielen</button>
           <button class="btn" id="b-clear" type="button">Leeren</button>
+        </div>
+        <div class="ledit" id="ledit" hidden>
+          <label class="live"><input type="checkbox" id="l-auto"> Beträge automatisch</label>
+          <p id="l-name">Last</p>
+          <div class="dirs" id="l-dirs" role="group" aria-label="Richtung der Last">
+            <button type="button" data-deg="135" title="nach links oben">↖</button><button type="button" data-deg="90" title="nach oben">↑</button><button type="button" data-deg="45" title="nach rechts oben">↗</button>
+            <button type="button" data-deg="180" title="nach links">←</button><span></span><button type="button" data-deg="0" title="nach rechts">→</button>
+            <button type="button" data-deg="-135" title="nach links unten">↙</button><button type="button" data-deg="-90" title="nach unten">↓</button><button type="button" data-deg="-45" title="nach rechts unten">↘</button>
+          </div>
+          <label class="field">Betrag in kN<input type="number" id="l-kn" min="0.5" max="100" step="0.5" inputmode="decimal"></label>
+          <button class="btn" type="button" id="l-del">Last entfernen</button>
         </div>
         <div class="actions" id="act-result" hidden>
           <button class="btn primary" id="b-retry" type="button">Neuer Versuch</button>
