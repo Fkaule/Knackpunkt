@@ -1518,7 +1518,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     $('b-duel').hidden = mp.on || st.phase !== 'result' || !st.res || !st.res.ok || st.practice;
     if (st.phase !== 'result') $('share').hidden = true;
     const openRules = st.open || (mp.role === 'host' && mp.g.mo === 'o');   // der Beamer erklärt die Regeln der laufenden Runde
-    const zoom = mp.role === 'host' && mp.zoom != null;   // große Ansicht nach der Auflösung: keine Regeltexte
+    const zoom = mp.zoom != null;   // große Ansicht nach der Auflösung: keine Regeltexte
     $('howto').hidden = openRules || edit || zoom;
     $('howto-open').hidden = !openRules || edit || zoom;
     $('howto-edit').hidden = !edit;
@@ -2109,9 +2109,10 @@ if (typeof module !== 'undefined') module.exports = PARTS;
 
   const mp = { on: false, role: null, code: '', name: '', j: 0, rid: 0, sub: false, revealed: 0, own: null,
     g: { rid: 0, ph: 'lobby', lv: 0, nr: 0, bc: '', dur: 90, left: 0, pr: 2, mo: 'b' }, pr: 0, broken: false, tick: null, deadline: 0, revealTimer: null,
-    snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false, hp: false, zoom: null };
+    snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false, hp: false, zoom: null, all: false, bset: null, bsc: null };
   let mpScr = '';
-  // hp: die Spielleitung spielt selbst mit (Name in mp.name), zoom: Entwurf in der großen Ansicht nach der Auflösung
+  // hp: die Spielleitung spielt selbst mit (Name in mp.name), zoom: Entwurf in der großen Ansicht nach der Auflösung,
+  // all: Mitspielende sehen die Übersicht aller Entwürfe, bset: Runde, Spielart und Proben der Übersicht, bsc: Gesamtwertung dazu
   const plays = () => mp.role === 'player' || (mp.role === 'host' && mp.hp);
 
   const inRoom = () => net.peers.filter(p => !p.sameTab && p.presence && p.presence.k === mp.code);
@@ -2156,7 +2157,8 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
   function startPlayerRound(g) {
     st.open = g.mo === 'o';
-    Object.assign(mp, { rid: g.rid, sub: false, broken: false, own: null, pr: st.open ? 0 : g.pr });
+    stopBoard();
+    Object.assign(mp, { rid: g.rid, sub: false, broken: false, own: null, pr: st.open ? 0 : g.pr, all: false, zoom: null, order: null, snap: null });
     pres({ r: g.rid, s: 0, d: null, pu: 0, rm: 0, x: 0 });
     loadLevel(g.lv, g.lv === CUSTOM ? g.bc : g.nr);
     st.probes = mp.pr;
@@ -2284,7 +2286,35 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     while (patch.res.length && size({ ...myPres, ...patch }) > 3800) patch.res.pop();
     pres(patch);
     saveHost();
+    mp.bset = { rid: mp.g.rid, mo: mp.g.mo, pr: mp.g.pr };
     startBoard();
+  }
+  // Übersicht für Mitspielende: Rangliste der Spielleitung, Entwürfe aus der Live-Verbindung, jedes Gerät rechnet selbst nach
+  function playerAll() {
+    const h = hostPeer(), g = hostG();
+    if (!h || !g || g.rid !== mp.rid || g.ph !== 'reveal' || !mp.own) return;
+    const by = new Map(net.peers.map(p => [p.peer, p.presence || {}])), list = [];
+    for (const e of validRes(h.presence.res)) {
+      const q = by.get(e.peer), solid = q && q.r === mp.rid && q.s === 1 ? decode(q.d, st.L) : null;
+      if (!solid) continue;
+      const res = FEM.analyze(st.L, solid);
+      list.push({ peer: e.peer, name: e.name, solid, res, ok: res.ok, rem: Math.round(removedPct(st.L, solid, res.conn) * 10) / 10,
+        pu: Math.max(0, Math.min(g.pr, Math.round(Number(q.pu) || 0))) });
+    }
+    Object.assign(mp, { snap: list, all: true, zoom: null, bset: { rid: g.rid, mo: g.mo, pr: g.pr }, bsc: h.presence.sc });
+    startBoard();
+  }
+  // zurück zum eigenen Ergebnis
+  function playerMine() {
+    stopBoard();
+    Object.assign(mp, { all: false, zoom: null });
+    const r = mp.own;
+    if (r) {
+      st.solid = r.solid.slice(); st.conn = r.conn; st.res = r;
+      st.view = { mode: 'result', res: r, solid: st.solid, scale: r.disp ? niceScale(r) : 0, t: 0 };
+      showFem(r, st.view.scale); stamp(r.ok);
+    }
+    panel(); controls(); mpRender();
   }
   function hostNext() {
     stopBoard();
@@ -2296,7 +2326,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     clearInterval(mp.tick); clearTimeout(mp.revealTimer); mp.revealTimer = null; stopBoard();
     if (mp.role === 'host' && endGame) store.set('host', null);
     if (mp.role) pres({ k: null, h: null, n: null, j: null, g: null, r: null, s: null, d: null, res: null, sc: null, p: null });
-    Object.assign(mp, { role: null, code: '', rid: 0, sub: false, revealed: 0, own: null, snap: null, order: null, conflict: false, zoom: null });
+    Object.assign(mp, { role: null, code: '', rid: 0, sub: false, revealed: 0, own: null, snap: null, order: null, conflict: false, zoom: null, all: false });
     $('zoomhead').hidden = true;
     st.phase = 'design';
     mpScr = ''; mpRender();
@@ -2312,7 +2342,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     mpRender();
     const step = reduce ? 0 : Math.max(450, Math.min(1300, 14000 / Math.max(1, mp.order.length)));
     const next = () => {
-      if (mp.role !== 'host' || !mp.order) return;
+      if (!mp.order) return;
       if (mp.shown < mp.order.length) { mp.shown++; showCards(); mp.boardTimer = setTimeout(next, step); }
       else { mp.boardTimer = null; mpRender(); }
     };
@@ -2325,7 +2355,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       card.dataset.open = String(open);
       drawMini(card.querySelector('canvas'), st.L, e.solid, open ? e.res : null);
       card.querySelector('.vl').textContent = !open ? ''
-        : `${fmt(e.rem, 1)} % entfernt` + (mp.g.mo !== 'o' && mp.g.pr ? `, ${e.pu === 1 ? '1 Probe' : `${e.pu} Proben`}` : '');
+        : `${fmt(e.rem, 1)} % entfernt` + (mp.bset.mo !== 'o' && mp.bset.pr ? `, ${e.pu === 1 ? '1 Probe' : `${e.pu} Proben`}` : '');
       const vd = card.querySelector('.vd');
       vd.textContent = !open ? '' : e.ok ? 'Hält' : 'Hält nicht';
       vd.className = 'vd' + (!open ? '' : e.ok ? ' ok' : ' bad');
@@ -2347,10 +2377,12 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     s.addEventListener('animationend', done);
     setTimeout(done, 1600);   // falls die Animation nicht zu Ende läuft, etwa im Hintergrund-Tab
   }
+  // Übersicht zu sehen: am Beamer in der Auflösung, bei Mitspielenden auf Wunsch
+  const boardOn = () => mp.role === 'host' ? mp.g.ph === 'reveal' : mp.all;
   // Große Ansicht eines Entwurfs, sobald alle aufgedeckt sind: das FEM-Ergebnis wie im Einzelspiel, Schriftfeld dazu
   function zoomTo(i) {
     const n = mp.order ? mp.order.length : 0;
-    if (mp.role !== 'host' || mp.g.ph !== 'reveal' || !n || mp.shown < n) return;
+    if (!boardOn() || !n || mp.shown < n || st.busy) return;
     mp.zoom = (i + n) % n;
     const e = mp.order[mp.zoom], r = e.res;
     st.solid = e.solid.slice(); st.conn = r.conn; st.res = r;
@@ -2436,12 +2468,12 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       if (mp.g.ph === 'reveal' && mp.zoom != null) return 'h-zoom';
       return 'h-' + mp.g.ph;
     }
-    if (mp.rid && mp.revealed === mp.rid) return 'p-result';
+    if (mp.rid && mp.revealed === mp.rid) return !mp.all ? 'p-result' : mp.zoom != null ? 'p-zoom' : 'p-all';
     const g = hostG();
     if (g && g.ph === 'design' && g.rid === mp.rid) return mp.sub ? 'p-locked' : 'p-design';
     return 'p-wait';
   }
-  const DRAWING = { 'p-design': 1, 'p-locked': 1, 'p-result': 1, 'h-design': 1, 'h-play': 1, 'h-zoom': 1 };
+  const DRAWING = { 'p-design': 1, 'p-locked': 1, 'p-result': 1, 'p-zoom': 1, 'h-design': 1, 'h-play': 1, 'h-zoom': 1 };
   const SIDE = {
     start: () => `<p class="mp-net" id="mp-net"></p>
       <h3>Mitspielen</h3>
@@ -2480,6 +2512,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       <p id="mp-msg"></p>`,
     'p-result': () => `<p class="mp-net" id="mp-net"></p>
       <div id="mp-result"></div>
+      <button class="btn primary" type="button" data-act="all" id="mp-all-btn">Alle Entwürfe ansehen</button>
       <h3>Diese Runde</h3><div id="mp-rank"></div>
       <h3>Gesamtwertung</h3><div id="mp-score"></div>
       <p>Die nächste Runde startet die Spielleitung.</p>`,
@@ -2521,7 +2554,13 @@ if (typeof module !== 'undefined') module.exports = PARTS;
         <button class="btn" type="button" data-act="znext">Nächster</button>
       </div>
       <button class="btn primary" type="button" data-act="zback">Alle Entwürfe</button>
-      <button class="btn" type="button" data-act="next">Nächste Runde</button>`,
+      <button class="btn" type="button" data-act="${mp.role === 'host' ? 'next">Nächste Runde' : 'mine">Mein Ergebnis'}</button>`,
+    'p-zoom': () => SIDE['h-zoom'](),
+    'p-all': () => `<p class="mp-net" id="mp-net"></p>
+      <p><b>Alle Entwürfe der Runde ${mp.bset.rid}.</b> Sie werden nacheinander aufgedeckt, der gewagteste zuletzt.</p>
+      <p class="mp-note" id="mp-hint"></p>
+      <button class="btn primary" type="button" data-act="mine">Mein Ergebnis</button>
+      <p>Die nächste Runde startet die Spielleitung.</p>`,
   };
   const BOARD = {
     start: () => `<h2>Wettkampf</h2>
@@ -2537,11 +2576,12 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       <h2 id="mp-count"></h2>
       <ul class="chips" id="mp-chips"></ul>`,
     // Karten im Raster mit etwa Wurzel aus der Anzahl Spalten: wenige Entwürfe werden groß
-    'h-reveal': () => `<h2>Runde ${mp.g.rid}: ${esc(partName(st.def))}</h2>
+    'h-reveal': () => `<h2>Runde ${mp.bset.rid}: ${esc(partName(st.def))}</h2>
       <div class="cards" id="mp-cards" style="--cols: ${Math.ceil(Math.sqrt((mp.order || []).length)) || 1}">${(mp.order || []).map((e, i) =>
         `<div class="card" data-act="zoom" data-i="${i}"><div class="pic"><canvas></canvas></div>` +
         `<div class="cap"><span class="nm">${esc(e.name)}</span><span class="vd"></span></div><div class="vl"></div></div>`).join('')}</div>
       <div class="split" id="mp-final"></div>`,
+    'p-all': () => BOARD['h-reveal'](),
   };
 
   function mpSync() {
@@ -2578,7 +2618,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
         $('mp-hp').onchange = syncHp;
         syncHp();
       }
-      if (scr === 'h-reveal') showCards(true);
+      if (scr === 'h-reveal' || scr === 'p-all') showCards(true);
       if (show) requestAnimationFrame(() => { if (wrap.clientWidth) { layout(); render(); } });
     }
     fillScreen(scr);
@@ -2635,6 +2675,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
         t += i >= 0 ? ` Platz ${places(res)[i]} von ${res.length}.` : res.length ? ' Ihr Entwurf kam nicht rechtzeitig an und wird nicht gewertet.' : '';
       }
       set('mp-result', `<p>${t}</p>`);
+      $('mp-all-btn').disabled = !r || !res.length;   // erst nach dem eigenen Aufdecken
       set('mp-rank', res.length ? rankHtml(res, me, esoNow()) : '<p>Die Rangliste kommt gleich.</p>');
       set('mp-score', scoreHtml(h ? validSc(h.presence.sc) : []));
     }
@@ -2651,16 +2692,17 @@ if (typeof module !== 'undefined') module.exports = PARTS;
         : `${ps.filter(done).length + me} von ${ps.length + me} haben abgegeben.`);
       set('mp-chips', chips(true));
     }
-    if (scr === 'h-reveal' && mp.order && mp.shown >= mp.order.length) {
-      set('mp-final', `<div><h2>Rangliste</h2>${rankHtml(mp.snap, '', esoNow())}</div>` +
-        `<div><h2>Gesamtwertung</h2>${scoreHtml(validSc(scoreList()))}</div>`);
+    if ((scr === 'h-reveal' || scr === 'p-all') && mp.order && mp.shown >= mp.order.length) {
+      const host = mp.role === 'host';
+      set('mp-final', `<div><h2>Rangliste</h2>${rankHtml(mp.snap, host ? '' : myPeer(), esoNow())}</div>` +
+        `<div><h2>Gesamtwertung</h2>${scoreHtml(validSc(host ? scoreList() : mp.bsc))}</div>`);
       if (mp.order.length) {
         $('mp-cards').classList.add('all');
         set('mp-hint', 'Für die große Ansicht einen Entwurf anklicken, mit den Pfeiltasten blättern.');
       }
     }
-    $('zoomhead').hidden = scr !== 'h-zoom';
-    if (scr === 'h-zoom') {
+    $('zoomhead').hidden = scr !== 'h-zoom' && scr !== 'p-zoom';
+    if (scr === 'h-zoom' || scr === 'p-zoom') {
       const e = mp.order[mp.zoom], r = e.res;
       set('zoomhead', `<span class="nm">${esc(e.name)}</span> <span class="${e.ok ? 't-ok' : 't-bad'}">${e.ok ? 'Hält' : 'Hält nicht'}</span>` +
         `<span class="zs">${fmt(e.rem, 1)} % entfernt. ${e.ok ? `Max. Auslastung ${fmt(100 * r.maxUtil)} %.` : failWhy(r)}</span>`);
@@ -2687,7 +2729,8 @@ if (typeof module !== 'undefined') module.exports = PARTS;
 
   const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
     leave: () => leaveRoom(false), end: () => leaveRoom(true), start: hostStart, now: hostEndNow, next: hostNext,
-    zoom: b => zoomTo(+b.dataset.i), zprev: () => zoomTo(mp.zoom - 1), znext: () => zoomTo(mp.zoom + 1), zback: zoomEnd };
+    zoom: b => zoomTo(+b.dataset.i), zprev: () => zoomTo(mp.zoom - 1), znext: () => zoomTo(mp.zoom + 1), zback: zoomEnd,
+    all: playerAll, mine: playerMine };
   for (const id of ['mp-ui', 'mp-board']) $(id).addEventListener('click', e => {
     const b = e.target.closest('[data-act]');
     if (b && !b.disabled && ACTS[b.dataset.act]) ACTS[b.dataset.act](b);
@@ -2852,7 +2895,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     // + und − schalten die Linie auf Hinzufügen oder Entfernen, 1 bis 3 wählen ihre Dicke (beides wählt auch die Linie)
     if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || st.phase === 'edit') return;
     // Auflösung am Beamer: Pfeiltasten öffnen und blättern die große Ansicht, Esc zeigt wieder alle Entwürfe
-    if (mp.role === 'host' && mp.g.ph === 'reveal' && mp.order && mp.order.length && mp.shown >= mp.order.length) {
+    if (boardOn() && mp.order && mp.order.length && mp.shown >= mp.order.length) {
       const d = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
       if (d) { e.preventDefault(); zoomTo(mp.zoom == null ? (d > 0 ? 0 : -1) : mp.zoom + d); return; }
       if (e.key === 'Escape' && mp.zoom != null) { zoomEnd(); return; }
@@ -2945,11 +2988,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     BANDS.map((c, b) => `<li><i style="background:${c}"></i><span>${b % 2 ? '' : fmt(RE * b / 10)}</span></li>`).join('') +
     `<li><i style="background:${OVER}"></i><span>${RE}</span></li></ol><span>über ${RE} MPa versagt die Kachel</span>`;
 
-  const repaint = () => { readColors(); render(); if (mpScr === 'h-reveal') showCards(true); };
+  const repaint = () => { readColors(); render(); if (mpScr === 'h-reveal' || mpScr === 'p-all') showCards(true); };
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', repaint);
   new MutationObserver(repaint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   new ResizeObserver(() => { if (wrap.clientWidth && (!G || Math.abs(wrap.clientWidth - G.W) > 1)) { layout(); render(); } }).observe(wrap);
-  addEventListener('resize', () => { layout(); render(); if (mpScr === 'h-reveal') showCards(true); });
+  addEventListener('resize', () => { layout(); render(); if (mpScr === 'h-reveal' || mpScr === 'p-all') showCards(true); });
   if (document.fonts) document.fonts.ready.then(render);
 
   readColors();
