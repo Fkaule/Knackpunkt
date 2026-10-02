@@ -37,7 +37,7 @@ const PARTS = (FEM => {
   const wall = (tiles, side) => ({ kind: 'wand', tiles, side, fix: 3 });
   // Das Loslager hält nur senkrecht zur Auflagefläche
   const pin = (kind, tile, side) => ({ kind, tiles: [tile], side, lock: true, fix: kind === 'fest' ? 3 : side === 'left' || side === 'right' ? 1 : 2 });
-  const load = (tiles, side, deg) => ({ tiles, side, fx: DIR[deg][0] * 1000, fy: DIR[deg][1] * 1000 });   // 1 kN, wird skaliert
+  const load = (tiles, side, deg, kn = 1) => ({ tiles, side, fx: DIR[deg][0] * 1000 * kn, fy: DIR[deg][1] * 1000 * kn });   // kn in kN
   // bis zu n Kacheln ab (x, y) entlang einer Seite, solange die Seite frei liegt
   function run(g, x, y, side, n, step) {
     const [dx, dy] = OUT[side], vert = side === 'left' || side === 'right', out = [];
@@ -233,6 +233,14 @@ const PARTS = (FEM => {
     def.util = r.maxUtil * F;
     return '';
   }
+  // Beträge stehen fest: nur prüfen, ob das Vollteil gelagert ist und hält
+  function check(def) {
+    const L = FEM.level(def), r = FEM.analyze(L, L.domain);
+    if (r.reason === 'mechanismus' || r.reason === 'lastpfad' || !(r.maxUtil > 0)) return 'beweglich';
+    if (r.maxUtil > 1) return 'voll';
+    def.util = r.maxUtil;
+    return '';
+  }
   const cutOf = g => { const cut = []; for (let k = 0; k < g.c.length; k++) if (!g.c[k]) cut.push([k % g.tx, Math.floor(k / g.tx)]); return cut; };
 
   function generate(nr) {
@@ -250,29 +258,32 @@ const PARTS = (FEM => {
   }
 
   // ---------- eigene Bauteile (Baukasten) ----------
-  // Rohform: { tx, ty, cells (1 = Material), supports: [{ kind, side, tiles }], load: { side, tiles, deg } | null }
-  // shape: daraus ein Bauteil wie die festen (Last 1 kN), ohne Prüfung, etwa zum Zeichnen beim Bauen
+  // Rohform: { tx, ty, cells (1 = Material), supports: [{ kind, side, tiles }], loads: [{ side, tiles, deg, kn }], auto }
+  // auto: alle Lasten gleich groß und so bemessen wie bei den festen Bauteilen, sonst gilt kn (Betrag in kN)
+  // shape: daraus ein Bauteil wie die festen, ohne Prüfung, etwa zum Zeichnen beim Bauen (bei auto jede Last 1 kN)
   function shape(raw) {
     const g = grid(raw.tx, raw.ty, 0);
     g.c.set(raw.cells);
     return { tx: g.tx, ty: g.ty, cut: cutOf(g),
       supports: raw.supports.map(s => s.kind === 'wand' ? wall(s.tiles, s.side) : pin(s.kind, s.tiles[0], s.side)),
-      loads: raw.load && raw.load.tiles.length ? [load(raw.load.tiles, raw.load.side, raw.load.deg)] : [] };
+      loads: raw.loads.map(l => load(l.tiles, l.side, l.deg, raw.auto ? 1 : l.kn)) };
   }
-  // build: prüfen und die Last bemessen. Ergebnis { def } oder { error }: leer, zerfallen, lager, last, kante, beweglich, bereich
+  // build: prüfen und bei auto die Lasten bemessen. Ergebnis { def } oder { error }:
+  // leer, zerfallen, lager, last, kante, beweglich, bereich (auto), voll (Vollteil hält die festen Beträge nicht)
   function build(raw) {
     const g = grid(raw.tx, raw.ty, 0);
     g.c.set(raw.cells);
     if (!g.c.some(Boolean)) return { error: 'leer' };
     if (!connected(g)) return { error: 'zerfallen' };
     if (!raw.supports.length) return { error: 'lager' };
-    if (!raw.load || !raw.load.tiles.length) return { error: 'last' };
+    if (!raw.loads.length || raw.loads.some(l => !l.tiles.length)) return { error: 'last' };
     const def = { name: 'Eigenes Bauteil', note: 'Selbst gebaut.', ...shape(raw) };
-    const error = itemsError(g, [...def.supports, ...def.loads]) || scale(def);
+    const error = itemsError(g, [...def.supports, ...def.loads]) || (raw.auto ? scale(def) : check(def));
     return error ? { error } : { def };
   }
   // Code für Link und Wettkampf: Version, Breite und Höhe (Basis 36), Material (6 Bit je Zeichen),
-  // je Lager Art, Seite, x, y, Anzahl; Last mit Seite, x, y, Anzahl und Richtung in 45°-Schritten
+  // je Lager Art, Seite, x, y, Anzahl; je Last Seite, x, y, Anzahl, Richtung in 45°-Schritten und Betrag in 0,1 kN
+  // (zwei Zeichen, Basis 36). Version 1 kannte nur eine Last ohne Betrag, sie wird automatisch bemessen.
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
   const SIDES = { L: 'left', R: 'right', T: 'top', B: 'bottom' }, KINDS = { w: 'wand', f: 'fest', l: 'los' };
   const DEGS = [0, 45, 90, 135, 180, -135, -90, -45];
@@ -286,26 +297,29 @@ const PARTS = (FEM => {
     }
     const run = r => letter(SIDES, r.side) + [Math.min(...r.tiles.map(t => t[0])), Math.min(...r.tiles.map(t => t[1])), r.tiles.length]
       .map(n => n.toString(36)).join('');
-    return '1' + raw.tx.toString(36) + raw.ty.toString(36) + '.' + bits + '.' + raw.supports.map(s => letter(KINDS, s.kind) + run(s)).join('') +
-      '.' + run(raw.load) + DEGS.indexOf(raw.load.deg);
+    return '2' + raw.tx.toString(36) + raw.ty.toString(36) + '.' + bits + '.' + raw.supports.map(s => letter(KINDS, s.kind) + run(s)).join('') +
+      '.' + raw.loads.map(l => run(l) + DEGS.indexOf(l.deg) + Math.round(l.kn * 10).toString(36).padStart(2, '0')).join('');
   }
   function decode(code) {
-    const m = /^1([0-9a-z])([0-9a-z])\.([A-Za-z0-9_-]+)\.((?:[wfl][LRTB][0-9a-z]{3})*)\.([LRTB][0-9a-z]{3}[0-7])$/.exec(String(code));
+    const m = /^([12])([0-9a-z])([0-9a-z])\.([A-Za-z0-9_-]+)\.((?:[wfl][LRTB][0-9a-z]{3})*)\.([LRTB0-9a-z]+)$/.exec(String(code));
     if (!m) return null;
-    const tx = parseInt(m[1], 36), ty = parseInt(m[2], 36);
-    if (!tx || !ty || m[3].length !== Math.ceil(tx * ty / 6)) return null;
+    const v2 = m[1] === '2', tx = parseInt(m[2], 36), ty = parseInt(m[3], 36);
+    const lds = v2 ? /^(?:[LRTB][0-9a-z]{3}[0-7][0-9a-z]{2})+$/.test(m[6]) && m[6].match(/.{7}/g) : /^[LRTB][0-9a-z]{3}[0-7]$/.test(m[6]) && [m[6]];
+    if (!lds || !tx || !ty || m[4].length !== Math.ceil(tx * ty / 6)) return null;
     const cells = new Uint8Array(tx * ty);
-    for (let i = 0; i < m[3].length; i++) {
-      const v = B64.indexOf(m[3][i]);
+    for (let i = 0; i < m[4].length; i++) {
+      const v = B64.indexOf(m[4][i]);
       for (let b = 0; b < 6; b++) if (i * 6 + b < cells.length) cells[i * 6 + b] = (v >> (5 - b)) & 1;
     }
     const run = t => {
       const side = SIDES[t[0]], [x, y, n] = [t[1], t[2], t[3]].map(c => parseInt(c, 36)), vert = side === 'left' || side === 'right';
       return { side, tiles: line(n, i => vert ? [x, y + i] : [x + i, y]) };
     };
-    const supports = (m[4].match(/.{5}/g) || []).map(t => ({ kind: KINDS[t[0]], ...run(t.slice(1)) }));
+    const supports = (m[5].match(/.{5}/g) || []).map(t => ({ kind: KINDS[t[0]], ...run(t.slice(1)) }));
     if (supports.some(s => s.kind !== 'wand' && s.tiles.length !== 1)) return null;
-    return { tx, ty, cells, supports, load: { ...run(m[5]), deg: DEGS[+m[5][4]] } };
+    const loads = lds.map(t => ({ ...run(t), deg: DEGS[+t[4]], kn: v2 ? parseInt(t.slice(5), 36) / 10 : 1 }));
+    if (loads.some(l => !(l.kn >= 0.1 && l.kn <= 100))) return null;
+    return { tx, ty, cells, supports, loads, auto: !v2 };
   }
   // fertiges Bauteil aus einem Code, oder null
   function fromCode(code) {

@@ -227,7 +227,7 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 ## Aufbau
 
 - `src/fem.js`: FE-Kern (Viereckelemente mit inkompatiblen Moden, Band-Cholesky, ESO), ohne DOM
-- `src/parts.js`: Zufallsbauteile aus einer Nummer, Baukasten-Prüfung, Bemessung der Last, Code für Links, ohne DOM
+- `src/parts.js`: Zufallsbauteile aus einer Nummer, Baukasten-Prüfung, Bemessung der Lasten, Code für Links (Version 2 mit mehreren Lasten und Beträgen, Version 1 wird weiter gelesen), ohne DOM
 - `src/game.js`: Spiel, Zeichnung, Baukasten, Wettkampf (Presence über claude.ai-Raum oder eigenen Server)
 - `src/shell.html`: Seite und Stil
 - `game.html`: gebaute Spieldatei (Seitenfragment), läuft als claude.ai-Artifact und über `server.mjs`
@@ -249,7 +249,7 @@ Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 
 - **Fest:** Kragarm, Brücke, L-Winkel (Tabelle oben)
 - **Zufall:** Jede Nummer von 1 bis 99.999 ergibt auf jedem Gerät dasselbe Bauteil. Acht Bauformen (Kragarm, Träger, Konsole, Winkel, Rahmen, Mast, Galgen, Hänger) mit zufälligen Maßen, Aussparungen, manchmal einem vorgegebenen Loch, Lastangriff und Lastrichtung. Die Nummer steht im Link (`#nr-4711`), damit man ein Bauteil wiederholen oder weitergeben kann
-- **Bauen:** Im Baukasten Material aufziehen, Einspannung, Festlager, Loslager und eine Last an Außenkanten setzen; das Spiel prüft, ob das Bauteil gelagert ist, und bemisst die Last. Zum Start wird das zuletzt gezeigte Bauteil übernommen, man kann es also auch abwandeln. Beim Spielen steht das Bauteil im Link (`#bau-…`)
+- **Bauen:** Im Baukasten Material aufziehen, Einspannung, Festlager, Loslager und Lasten an Außenkanten setzen, auch mehrere Lasten. Richtung (in 45°-Schritten) und Betrag lassen sich je Last einstellen, den Betrag auch durch Ziehen am Pfeil (die Pfeillänge zeigt den Betrag); mit „Beträge automatisch“ werden alle Lasten gleich groß und so bemessen, dass das Vollteil zu gut 50 % ausgelastet ist. Das Spiel prüft, ob das Bauteil gelagert ist und das Vollteil hält. Wahlweise zeigt „FE-Rechnung live zeigen“ beim Bauen nach jeder Änderung die Auslastung des Vollteils, auch während man einen Lastpfeil zieht. Zum Start wird das zuletzt gezeigte Bauteil übernommen, man kann es also auch abwandeln. Beim Spielen steht das Bauteil im Link (`#bau-…`)
 
 ## Herausfordern
 
