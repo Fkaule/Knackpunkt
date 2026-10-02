@@ -305,7 +305,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Halbe Kacheln (abgeschnittene Ecke) bekommen entlang der Schnittkante lineare Dreieckselemente. Bei Masse und Wertung zählen sie halb.</li>
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
-            <li>Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
+            <li id="rule-eso">Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
         </details>
@@ -1088,6 +1088,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   // Kursmodus (?kurs): eingebettet in die Kursseite, nur das verlinkte Bauteil, blind, ohne Herausforderung.
   // Gehaltene Runden ohne Live-Spannungen gehen per postMessage an die Kursseite (Bestenliste dort).
   const KURS = new URLSearchParams(location.search).has('kurs');
+  const KURS_PROBEN = 3;   // Probe-Rechnungen je Versuch im Kurs (sonst eine); ohne Lösung des Algorithmus
   const KURS_NAME = (new URLSearchParams(location.search).get('kurs') || '').replace(/[<>&"]/g, '').slice(0, 40);   // ?kurs=Lenker
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
@@ -1590,6 +1591,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     $('howto-open').hidden = !openRules || edit || zoom;
     $('howto-edit').hidden = !edit;
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
+    $('b-eso').hidden = KURS;
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
     $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = $('t-line').disabled = !design || st.busy;
@@ -1634,7 +1636,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     if (KURS && KURS_NAME && i === CUSTOM) Object.assign(def, { name: KURS_NAME, note: 'Aus der Übung nachgebaut. Nehmen Sie so viel Material weg, wie es geht.' });
     st.li = i; st.def = def; st.key = def.nr ? 'z' + def.nr : def.code ? 'b' + def.code : i; st.L = FEM.level(def);
     if (duel && duel.key !== partKey()) duel = null;   // anderes Bauteil beendet die Herausforderung
-    st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
+    st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
     st.drag = null; st.paint = null; st.hover = -1;
     $('stamp').hidden = true;
     document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
@@ -1757,7 +1759,8 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       }
       h = `<p><span class="t-bad">Versagt.</span> ${why} Gewertet: 0 %.</p>`;
     }
-    if (!e) h += '<p>Der Algorithmus rechnet noch …</p>';
+    if (KURS) { /* im Kurs ohne Vergleich mit dem Algorithmus */ }
+    else if (!e) h += '<p>Der Algorithmus rechnet noch …</p>';
     else {
       const er = removedPct(L, e.solid, e.res.conn);
       let cmp = '';
@@ -1836,6 +1839,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
 
   // ESO läuft im Hintergrund in kleinen Zeitscheiben, damit das Zeichnen flüssig bleibt
   function startEso() {
+    if (KURS) return;
     const key = st.key;
     if (st.eso[key] || (st.esoRun && st.esoRun.key === key)) return;
     const gen = FEM.eso(st.L), run = st.esoRun = { key };
@@ -3108,7 +3112,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   $('b-reset').onclick = resetAll;
   $('b-retry').onclick = () => {
     if (st.busy) return;
-    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.practice = $('live').checked;
+    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.practice = $('live').checked;
     $('stamp').hidden = true; refresh();
   };
   $('b-eso').onclick = toggleEso;
@@ -3167,7 +3171,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   readColors();
   if (KURS) {
     document.documentElement.classList.add('kurs');
-    for (const el of [document.querySelector('.top .nav'), $('g-blind').parentElement, $('b-next'), $('share')]) el.hidden = true;
+    for (const el of [document.querySelector('.top .nav'), $('g-blind').parentElement, $('b-next'), $('share'), $('rule-eso')]) el.hidden = true;
     // Höhe an die Kursseite melden, damit der Rahmen ohne eigenen Scrollbalken passt
     const hoehe = () => parent.postMessage({ typ: 'knackpunkt-hoehe', h: document.documentElement.scrollHeight }, '*');
     new ResizeObserver(hoehe).observe(document.body);

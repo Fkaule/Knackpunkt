@@ -267,7 +267,7 @@ Nach einer Runde allein, die hält und ohne Live-Spannungen gespielt wurde, erze
 | `#duell~…` | einer Herausforderung |
 | `#RAUMCODE` | dem Wettkampf, Raumcode schon eingetragen |
 
-**Kursmodus** (`?kurs=Name#bau-…`): zum Einbetten in eine Kursseite (iframe). Es gibt nur das verlinkte Bauteil unter dem angegebenen Namen, nur „Blind“, keine Herausforderung und kein nächstes Bauteil. Nach jeder Runde, die hält und ohne Live-Spannungen gespielt wurde, schickt das Spiel `{ typ: 'knackpunkt-ergebnis', teil, prozent, entwurf }` per `postMessage` an die einbettende Seite; die führt die Bestenliste. Dazu meldet es seine Höhe (`{ typ: 'knackpunkt-hoehe', h }`), damit der Rahmen ohne eigenen Scrollbalken passt.
+**Kursmodus** (`?kurs=Name#bau-…`): zum Einbetten in eine Kursseite (iframe). Es gibt nur das verlinkte Bauteil unter dem angegebenen Namen, nur „Blind“ mit drei Probe-Rechnungen je Versuch, ohne Lösung des Algorithmus (ESO läuft gar nicht erst), keine Herausforderung und kein nächstes Bauteil. Nach jeder Runde, die hält und ohne Live-Spannungen gespielt wurde, schickt das Spiel `{ typ: 'knackpunkt-ergebnis', teil, prozent, entwurf }` per `postMessage` an die einbettende Seite; die führt die Bestenliste. Dazu meldet es seine Höhe (`{ typ: 'knackpunkt-hoehe', h }`), damit der Rahmen ohne eigenen Scrollbalken passt.
 
 ## Spielarten
 

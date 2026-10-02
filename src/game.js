@@ -59,6 +59,7 @@
   // Kursmodus (?kurs): eingebettet in die Kursseite, nur das verlinkte Bauteil, blind, ohne Herausforderung.
   // Gehaltene Runden ohne Live-Spannungen gehen per postMessage an die Kursseite (Bestenliste dort).
   const KURS = new URLSearchParams(location.search).has('kurs');
+  const KURS_PROBEN = 3;   // Probe-Rechnungen je Versuch im Kurs (sonst eine); ohne Lösung des Algorithmus
   const KURS_NAME = (new URLSearchParams(location.search).get('kurs') || '').replace(/[<>&"]/g, '').slice(0, 40);   // ?kurs=Lenker
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
@@ -561,6 +562,7 @@
     $('howto-open').hidden = !openRules || edit || zoom;
     $('howto-edit').hidden = !edit;
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
+    $('b-eso').hidden = KURS;
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
     $('live').disabled = !design || st.busy;
     $('t-rect').disabled = $('t-brush').disabled = $('t-corner').disabled = $('t-line').disabled = !design || st.busy;
@@ -605,7 +607,7 @@
     if (KURS && KURS_NAME && i === CUSTOM) Object.assign(def, { name: KURS_NAME, note: 'Aus der Übung nachgebaut. Nehmen Sie so viel Material weg, wie es geht.' });
     st.li = i; st.def = def; st.key = def.nr ? 'z' + def.nr : def.code ? 'b' + def.code : i; st.L = FEM.level(def);
     if (duel && duel.key !== partKey()) duel = null;   // anderes Bauteil beendet die Herausforderung
-    st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
+    st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
     st.drag = null; st.paint = null; st.hover = -1;
     $('stamp').hidden = true;
     document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
@@ -728,7 +730,8 @@
       }
       h = `<p><span class="t-bad">Versagt.</span> ${why} Gewertet: 0 %.</p>`;
     }
-    if (!e) h += '<p>Der Algorithmus rechnet noch …</p>';
+    if (KURS) { /* im Kurs ohne Vergleich mit dem Algorithmus */ }
+    else if (!e) h += '<p>Der Algorithmus rechnet noch …</p>';
     else {
       const er = removedPct(L, e.solid, e.res.conn);
       let cmp = '';
@@ -807,6 +810,7 @@
 
   // ESO läuft im Hintergrund in kleinen Zeitscheiben, damit das Zeichnen flüssig bleibt
   function startEso() {
+    if (KURS) return;
     const key = st.key;
     if (st.eso[key] || (st.esoRun && st.esoRun.key === key)) return;
     const gen = FEM.eso(st.L), run = st.esoRun = { key };
@@ -2079,7 +2083,7 @@
   $('b-reset').onclick = resetAll;
   $('b-retry').onclick = () => {
     if (st.busy) return;
-    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = 1; st.phase = 'design'; st.practice = $('live').checked;
+    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.practice = $('live').checked;
     $('stamp').hidden = true; refresh();
   };
   $('b-eso').onclick = toggleEso;
@@ -2138,7 +2142,7 @@
   readColors();
   if (KURS) {
     document.documentElement.classList.add('kurs');
-    for (const el of [document.querySelector('.top .nav'), $('g-blind').parentElement, $('b-next'), $('share')]) el.hidden = true;
+    for (const el of [document.querySelector('.top .nav'), $('g-blind').parentElement, $('b-next'), $('share'), $('rule-eso')]) el.hidden = true;
     // Höhe an die Kursseite melden, damit der Rahmen ohne eigenen Scrollbalken passt
     const hoehe = () => parent.postMessage({ typ: 'knackpunkt-hoehe', h: document.documentElement.scrollHeight }, '*');
     new ResizeObserver(hoehe).observe(document.body);
