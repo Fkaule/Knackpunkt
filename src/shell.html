@@ -120,15 +120,20 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .chips .pd { display: inline-block; width: 9px; height: 9px; margin-left: 5px; border: 1.5px solid currentColor; border-radius: 50%; vertical-align: 0; }
 .chips .pd.on { background: currentColor; }
 .mp-note { font-size: 13px; color: var(--ink2); }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.cards { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 600px) { .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
 .card { position: relative; display: grid; gap: 4px; padding: 8px; border: 1.5px solid var(--rule); background: var(--sheet); min-width: 0; }
-.card canvas { width: 100%; cursor: default; touch-action: auto; }
-.card .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card canvas { width: 100%; cursor: inherit; touch-action: auto; }
+.card .cap { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; font-size: clamp(14px, 1.4vw, 18px); }
+.card .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.card .vd { font-weight: 700; white-space: nowrap; }
+.card .vd.ok { color: var(--ok); }
+.card .vd.bad { color: var(--bad); }
 .card .vl { font: 500 13px var(--f-mono); color: var(--ink2); min-height: 1.3em; }
-.card .st { position: absolute; top: 12px; right: 10px; font: 800 17px/1 var(--f-display); letter-spacing: 0.06em;
-  border: 3px solid currentColor; padding: 3px 6px 1px; transform: rotate(-8deg); background: var(--sheet); }
-.card .st.ok { color: var(--ok); }
-.card .st.bad { color: var(--bad); }
+.cards.all .card { cursor: zoom-in; }
+.cards.all .card:hover { border-color: var(--ink); }
+.zoomhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font: 800 clamp(24px, 3vw, 34px)/1.1 var(--f-display); letter-spacing: 0.02em; }
+.zoomhead .zs { font: 500 clamp(14px, 1.5vw, 18px) var(--f-body); color: var(--ink2); letter-spacing: 0; }
 .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 24px; }
 .rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
 .rank li { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
@@ -159,6 +164,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
   <main class="stage">
     <section class="sheet" aria-label="Zeichnung">
       <div id="drawing">
+        <div class="zoomhead" id="zoomhead" hidden></div>
         <div class="sheet-head">
           <p class="howto" id="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
             Mit dem <b>Pinsel</b> überstreichen Sie Kacheln. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.

@@ -125,15 +125,20 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 .chips .pd { display: inline-block; width: 9px; height: 9px; margin-left: 5px; border: 1.5px solid currentColor; border-radius: 50%; vertical-align: 0; }
 .chips .pd.on { background: currentColor; }
 .mp-note { font-size: 13px; color: var(--ink2); }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.cards { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 600px) { .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
 .card { position: relative; display: grid; gap: 4px; padding: 8px; border: 1.5px solid var(--rule); background: var(--sheet); min-width: 0; }
-.card canvas { width: 100%; cursor: default; touch-action: auto; }
-.card .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card canvas { width: 100%; cursor: inherit; touch-action: auto; }
+.card .cap { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; font-size: clamp(14px, 1.4vw, 18px); }
+.card .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.card .vd { font-weight: 700; white-space: nowrap; }
+.card .vd.ok { color: var(--ok); }
+.card .vd.bad { color: var(--bad); }
 .card .vl { font: 500 13px var(--f-mono); color: var(--ink2); min-height: 1.3em; }
-.card .st { position: absolute; top: 12px; right: 10px; font: 800 17px/1 var(--f-display); letter-spacing: 0.06em;
-  border: 3px solid currentColor; padding: 3px 6px 1px; transform: rotate(-8deg); background: var(--sheet); }
-.card .st.ok { color: var(--ok); }
-.card .st.bad { color: var(--bad); }
+.cards.all .card { cursor: zoom-in; }
+.cards.all .card:hover { border-color: var(--ink); }
+.zoomhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font: 800 clamp(24px, 3vw, 34px)/1.1 var(--f-display); letter-spacing: 0.02em; }
+.zoomhead .zs { font: 500 clamp(14px, 1.5vw, 18px) var(--f-body); color: var(--ink2); letter-spacing: 0; }
 .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 24px; }
 .rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
 .rank li { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
@@ -164,6 +169,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
   <main class="stage">
     <section class="sheet" aria-label="Zeichnung">
       <div id="drawing">
+        <div class="zoomhead" id="zoomhead" hidden></div>
         <div class="sheet-head">
           <p class="howto" id="howto"><b>Rechteck aufziehen</b> nimmt viele Kacheln auf einmal weg, <b>antippen</b> eine einzelne.
             Mit dem <b>Pinsel</b> überstreichen Sie Kacheln. Beginnen Sie auf einer leeren Kachel, kommt Material zurück.
@@ -1474,7 +1480,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     $('tb-mass').textContent = `${fmt(kept * TILE_G)} von ${fmt(total * TILE_G)} g`;
     $('tb-removed').textContent = `${fmt(100 * (1 - kept / total), 1)} %`;
     $('tb-probe').textContent = st.open || (mp.role === 'host' && mp.g.mo === 'o') ? 'entfällt, offene Karten'
-      : mp.role === 'host' ? `${mp.g.pr} je Person`
+      : mp.role === 'host' && !mp.hp ? `${mp.g.pr} je Person`
       : st.probes ? `${st.probes} übrig` : mp.on ? 'keine übrig' : 'verbraucht';
     const rid = mp.role === 'host' ? mp.g.rid : mp.rid;
     $('tb-sheet').textContent = mp.on ? (rid ? `Runde ${rid}` : 'Warteraum')
@@ -1502,8 +1508,9 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     $('b-duel').hidden = mp.on || st.phase !== 'result' || !st.res || !st.res.ok || st.practice;
     if (st.phase !== 'result') $('share').hidden = true;
     const openRules = st.open || (mp.role === 'host' && mp.g.mo === 'o');   // der Beamer erklärt die Regeln der laufenden Runde
-    $('howto').hidden = openRules || edit;
-    $('howto-open').hidden = !openRules || edit;
+    const zoom = mp.role === 'host' && mp.zoom != null;   // große Ansicht nach der Auflösung: keine Regeltexte
+    $('howto').hidden = openRules || edit || zoom;
+    $('howto-open').hidden = !openRules || edit || zoom;
     $('howto-edit').hidden = !edit;
     $('b-submit').textContent = st.open ? 'Aufhören und werten' : 'Abgeben und rechnen';
     $('b-eso').textContent = st.phase === 'eso' ? 'Mein Ergebnis' : 'Lösung des Algorithmus';
@@ -1526,7 +1533,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       showFem(r, 0);
       st.liveText = `Offene Karten: ${statusText(r)} Jede Wegnahme ist endgültig.`;
       $('verdict').innerHTML = `<p>${st.liveText}</p>${hint}`;
-      if (mp.role === 'player') pres({ rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });   // Fortschritt für den Beamer
+      if (plays()) pres({ rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });   // Fortschritt für den Beamer
     } else if (!mp.on && $('live').checked) {
       const r = FEM.analyze(st.L, st.solid);
       st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
@@ -1575,7 +1582,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   // Offene Karten: die letzte Wegnahme hat das Bauteil zum Versagen gebracht, das Spiel ist vorbei
   function openFail() {
     st.paint = null; st.drag = null;
-    if (mp.role === 'player') return playerBreak();
+    if (plays()) return playerBreak();
     $('verdict').innerHTML = '<p>Rechnet …</p>';
     runReveal(verdict);
   }
@@ -1588,7 +1595,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     st.view = { mode: 'result', res: r, solid: st.solid, scale: 0 };
     showFem(r, 0);
     st.probeText = `Probe-Rechnung: ${statusText(r)} Die Farben verschwinden, sobald Sie weiterarbeiten.`;
-    if (mp.role === 'player') pres({ pu: mp.pr - st.probes });   // verbrauchte Proben für den Beamer
+    if (plays()) pres({ pu: mp.pr - st.probes });   // verbrauchte Proben für den Beamer
     $('verdict').innerHTML = `<p>${st.probeText}</p>`;
     panel(); controls(); render(); mpRender();
   }
@@ -2092,12 +2099,15 @@ if (typeof module !== 'undefined') module.exports = PARTS;
 
   const mp = { on: false, role: null, code: '', name: '', j: 0, rid: 0, sub: false, revealed: 0, own: null,
     g: { rid: 0, ph: 'lobby', lv: 0, nr: 0, bc: '', dur: 90, left: 0, pr: 2, mo: 'b' }, pr: 0, broken: false, tick: null, deadline: 0, revealTimer: null,
-    snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false };
+    snap: null, order: null, shown: 0, boardTimer: null, scores: {}, conflict: false, hp: false, zoom: null };
   let mpScr = '';
+  // hp: die Spielleitung spielt selbst mit (Name in mp.name), zoom: Entwurf in der großen Ansicht nach der Auflösung
+  const plays = () => mp.role === 'player' || (mp.role === 'host' && mp.hp);
 
   const inRoom = () => net.peers.filter(p => !p.sameTab && p.presence && p.presence.k === mp.code);
   const myPeer = () => (net.peers.find(p => p.sameTab) || {}).peer || '';
-  const players = () => inRoom().filter(p => p.presence.h !== 1 && typeof p.presence.n === 'string');
+  // Mitspielende, dazu eine Spielleitung, die mitspielt (p: 1)
+  const players = () => inRoom().filter(p => (p.presence.h !== 1 || p.presence.p === 1) && typeof p.presence.n === 'string');
   // Spielleitung ist, wer im Raum als Leitung am längsten dabei ist
   function hostPeer() {
     let best = null;
@@ -2144,13 +2154,14 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     panel();
   }
   function playerSubmit() {
-    if (mp.role !== 'player' || mp.sub || !editable()) return;
+    if (!plays() || mp.sub || !editable()) return;
     mp.sub = true;
     Object.assign(st, { phase: 'locked', paint: null, drag: null, hover: -1 });
     // blind: auch direkt nach einer Probe-Rechnung wird der Entwurf wieder ohne Spannungen gezeigt
     if (!st.open) { st.view = { mode: 'blind' }; $('legend').hidden = true; $('femline').textContent = ''; }
     pres({ r: mp.rid, s: 1, d: encode(st.solid), rm: Math.round(removedPct(st.L, st.solid, st.conn) * 10) });
     controls(); render(); mpRender();
+    if (mp.role === 'host') hostSync();   // waren alle anderen schon fertig, startet jetzt die Auflösung
   }
   // Offene Karten im Wettkampf: das Bauteil ist gebrochen, die Person ist in dieser Runde raus
   function playerBreak() {
@@ -2158,6 +2169,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     pres({ r: mp.rid, s: 1, x: 1, d: encode(st.solid) });
     runReveal(r => { mp.own = r; mpRender(); });
     mpRender();
+    if (mp.role === 'host') hostSync();
   }
   function playerSync() {
     const g = hostG();
@@ -2176,14 +2188,15 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   // ---------- Wettkampf: Spielleitung ----------
   const scoreList = () => Object.values(mp.scores).sort((a, b) => b.pts - a.pts).slice(0, 10).map(s => [s.name, Math.round(s.pts * 10)]);
   const saveHost = () => store.set('host', { code: mp.code, rid: mp.g.rid, lv: mp.g.lv, nr: mp.g.nr, bc: mp.g.bc, dur: mp.g.dur, pr: mp.g.pr, mo: mp.g.mo,
-    scores: mp.scores, t: Date.now() });
+    hp: mp.hp, name: mp.name, scores: mp.scores, t: Date.now() });
   function savedHost() {
     const h = store.get('host');
     return h && typeof h.code === 'string' && Date.now() - h.t < 6 * 3600e3 ? h : null;
   }
   function hostGame(resume) {
     const r = resume ? savedHost() : null;
-    Object.assign(mp, { role: 'host', code: r ? normCode(r.code) : newCode(), j: Date.now(), snap: null, order: null,
+    Object.assign(mp, { role: 'host', code: r ? normCode(r.code) : newCode(), j: Date.now(), snap: null, order: null, zoom: null,
+      hp: !!(r && r.hp), name: r && typeof r.name === 'string' ? clean(r.name, 16) : mp.name,
       scores: r && r.scores && typeof r.scores === 'object' ? r.scores : {},
       g: { rid: r ? r.rid | 0 : 0, ph: 'lobby', lv: 0, nr: 0, bc: '', dur: r ? r.dur || 90 : 90, left: 0,
         pr: r && Number.isInteger(r.pr) ? r.pr : 2, mo: r && r.mo === 'o' ? 'o' : 'b' } });
@@ -2197,14 +2210,18 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
   function hostStart() {
     const lv = +$('mp-lv').value, dur = +$('mp-dur').value, pr = +$('mp-pr').value, mo = $('mp-mo').value === 'o' ? 'o' : 'b';
+    mp.hp = $('mp-hp').checked;
+    if (mp.hp) { mp.name = clean($('mp-hn').value, 16) || 'Spielleitung'; store.set('name', mp.name); }
     Object.assign(mp.g, { rid: mp.g.rid + 1, ph: 'design', lv, nr: lv === RANDOM ? newNr() : 0, bc: lv === CUSTOM ? store.get('bau') || '' : '',
       dur, left: dur, pr, mo });
-    Object.assign(mp, { deadline: performance.now() + dur * 1000, snap: null, order: null });
+    Object.assign(mp, { deadline: performance.now() + dur * 1000, snap: null, order: null, zoom: null });
     stopBoard();
-    st.open = false;
+    st.open = mp.hp && mo === 'o';   // spielt die Spielleitung mit, gelten für sie dieselben Regeln
+    if (mp.hp) Object.assign(mp, { rid: mp.g.rid, sub: false, broken: false, own: null, pr: st.open ? 0 : pr });
     loadLevel(lv, lv === CUSTOM ? mp.g.bc : mp.g.nr);
-    st.phase = 'locked';
-    pres({ g: { ...mp.g }, res: null });
+    if (mp.hp) { st.probes = mp.pr; st.probeText = ''; }
+    else st.phase = 'locked';
+    pres({ g: { ...mp.g }, res: null, ...(mp.hp ? { n: mp.name, p: 1, r: mp.g.rid, s: 0, d: null, pu: 0, rm: 0, x: 0 } : { n: 'Spielleitung', p: null }) });
     clearInterval(mp.tick);
     mp.tick = setInterval(hostTick, 250);
     saveHost(); controls(); mpRender();
@@ -2213,6 +2230,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     if (mp.g.ph !== 'design') { clearInterval(mp.tick); return; }
     const left = Math.max(0, Math.ceil((mp.deadline - performance.now()) / 1000));
     if (left !== mp.g.left) { mp.g.left = left; pres({ g: { ...mp.g } }); mpRender(); }
+    if (mp.hp && left <= 1) playerSubmit();   // kurz vor Schluss automatisch abgeben, wie bei allen
     if (performance.now() > mp.deadline + 2500) hostReveal();   // Nachfrist für automatisch abgegebene Entwürfe
   }
   const hostEndNow = () => { mp.deadline = Math.min(mp.deadline, performance.now()); };
@@ -2221,12 +2239,14 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     mp.conflict = !!other && (other.presence.j < mp.j || (other.presence.j === mp.j && other.peer < myPeer()));
     if (mp.g.ph === 'design' && !mp.revealTimer) {
       const ps = players();
-      if (ps.length && ps.every(p => p.presence.r === mp.g.rid && p.presence.s === 1)) mp.revealTimer = setTimeout(hostReveal, 800);
+      if ((ps.length || mp.hp) && ps.every(p => p.presence.r === mp.g.rid && p.presence.s === 1) && (!mp.hp || mp.sub))
+        mp.revealTimer = setTimeout(hostReveal, 800);
     }
   }
   // Alle Entwürfe einsammeln, rechnen, werten und die Rangliste für alle veröffentlichen
   function hostReveal() {
     if (mp.g.ph !== 'design') return;
+    if (mp.hp) playerSubmit();   // spielt die Spielleitung mit und hat noch nicht abgegeben, jetzt
     clearInterval(mp.tick); clearTimeout(mp.revealTimer); mp.revealTimer = null;
     const L = st.L, list = [];
     for (const p of players()) {
@@ -2235,6 +2255,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       const res = FEM.analyze(L, solid);
       list.push({ peer: p.peer, name: clean(q.n, 16) || 'Jemand', solid, res, ok: res.ok, rem: Math.round(removedPct(L, solid, res.conn) * 10) / 10,
         pu: probesUsed(q) });
+    }
+    if (mp.hp) {   // der eigene Entwurf der mitspielenden Spielleitung
+      const solid = st.solid.slice(), res = FEM.analyze(L, solid);
+      list.push({ peer: myPeer(), name: mp.name, solid, res, ok: res.ok, rem: Math.round(removedPct(L, solid, res.conn) * 10) / 10,
+        pu: mp.pr - st.probes });
     }
     for (const e of list) {
       const key = e.name.toLowerCase(), s = mp.scores[key] || (mp.scores[key] = { name: e.name, pts: 0 });
@@ -2253,15 +2278,16 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
   function hostNext() {
     stopBoard();
-    mp.g.ph = 'lobby';
+    mp.g.ph = 'lobby'; mp.zoom = null;
     pres({ g: { ...mp.g } });
     mpRender();
   }
   function leaveRoom(endGame) {
     clearInterval(mp.tick); clearTimeout(mp.revealTimer); mp.revealTimer = null; stopBoard();
     if (mp.role === 'host' && endGame) store.set('host', null);
-    if (mp.role) pres({ k: null, h: null, n: null, j: null, g: null, r: null, s: null, d: null, res: null, sc: null });
-    Object.assign(mp, { role: null, code: '', rid: 0, sub: false, revealed: 0, own: null, snap: null, order: null, conflict: false });
+    if (mp.role) pres({ k: null, h: null, n: null, j: null, g: null, r: null, s: null, d: null, res: null, sc: null, p: null });
+    Object.assign(mp, { role: null, code: '', rid: 0, sub: false, revealed: 0, own: null, snap: null, order: null, conflict: false, zoom: null });
+    $('zoomhead').hidden = true;
     st.phase = 'design';
     mpScr = ''; mpRender();
   }
@@ -2290,17 +2316,33 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       drawMini(card.querySelector('canvas'), st.L, e.solid, open ? e.res : null);
       card.querySelector('.vl').textContent = !open ? ''
         : `${fmt(e.rem, 1)} % entfernt` + (mp.g.mo !== 'o' && mp.g.pr ? `, ${e.pu === 1 ? '1 Probe' : `${e.pu} Proben`}` : '');
-      if (open && !card.querySelector('.st')) {
-        const s = document.createElement('div');
-        s.className = 'st ' + (e.ok ? 'ok' : 'bad');
-        s.textContent = e.ok ? 'HÄLT' : 'BRUCH';
-        card.appendChild(s);
-      }
+      const vd = card.querySelector('.vd');
+      vd.textContent = !open ? '' : e.ok ? 'Hält' : 'Hält nicht';
+      vd.className = 'vd' + (!open ? '' : e.ok ? ' ok' : ' bad');
     }
   }
+  // Große Ansicht eines Entwurfs, sobald alle aufgedeckt sind: das FEM-Ergebnis wie im Einzelspiel, Schriftfeld dazu
+  function zoomTo(i) {
+    const n = mp.order ? mp.order.length : 0;
+    if (mp.role !== 'host' || mp.g.ph !== 'reveal' || !n || mp.shown < n) return;
+    mp.zoom = (i + n) % n;
+    const e = mp.order[mp.zoom], r = e.res;
+    st.solid = e.solid.slice(); st.conn = r.conn; st.res = r;
+    st.view = { mode: 'result', res: r, solid: st.solid, scale: r.disp ? niceScale(r) : 0, t: 0 };
+    showFem(r, st.view.scale);
+    $('stamp').hidden = true;
+    panel(); controls(); mpRender(); render();
+  }
+  function zoomEnd() {
+    if (mp.zoom == null) return;
+    mp.zoom = null;
+    $('legend').hidden = true; $('femline').textContent = '';
+    controls(); mpRender();
+  }
   function drawMini(canvas, L, solid, r) {
-    // Karte höchstens so hoch wie breit, hohe schmale Bauteile mittig
-    const W = canvas.clientWidth || 150, s = W / (Math.max(L.TX, L.TY) + 1), H = Math.round(s * (L.TY + 1)), dpr = devicePixelRatio || 1;
+    // Karte höchstens so hoch wie breit und höchstens 45 % der Fensterhöhe, hohe schmale Bauteile mittig
+    const W = canvas.clientWidth || 150, s = Math.min(W / (Math.max(L.TX, L.TY) + 1), innerHeight * 0.45 / (L.TY + 1));
+    const H = Math.round(s * (L.TY + 1)), dpr = devicePixelRatio || 1;
     const x0 = (W - s * (L.TX + 1)) / 2;
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + 'px';
     const c = canvas.getContext('2d');
@@ -2363,13 +2405,17 @@ if (typeof module !== 'undefined') module.exports = PARTS;
 
   function mpScreen() {
     if (!mp.role) return 'start';
-    if (mp.role === 'host') return 'h-' + mp.g.ph;
+    if (mp.role === 'host') {
+      if (mp.g.ph === 'design' && mp.hp && !mp.sub) return 'h-play';
+      if (mp.g.ph === 'reveal' && mp.zoom != null) return 'h-zoom';
+      return 'h-' + mp.g.ph;
+    }
     if (mp.rid && mp.revealed === mp.rid) return 'p-result';
     const g = hostG();
     if (g && g.ph === 'design' && g.rid === mp.rid) return mp.sub ? 'p-locked' : 'p-design';
     return 'p-wait';
   }
-  const DRAWING = { 'p-design': 1, 'p-locked': 1, 'p-result': 1, 'h-design': 1 };
+  const DRAWING = { 'p-design': 1, 'p-locked': 1, 'p-result': 1, 'h-design': 1, 'h-play': 1, 'h-zoom': 1 };
   const SIDE = {
     start: () => `<p class="mp-net" id="mp-net"></p>
       <h3>Mitspielen</h3>
@@ -2378,7 +2424,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       <button class="btn primary" type="button" data-act="join">Beitreten</button>
       <p class="mp-warn" id="mp-msg"></p>
       <h3>Spiel leiten</h3>
-      <p>Für Leinwand oder Beamer: Raum eröffnen, Bauteil und Zeit wählen, Runden starten. Die Spielleitung spielt nicht mit.</p>
+      <p>Für Leinwand oder Beamer: Raum eröffnen, Bauteil und Zeit wählen, Runden starten. Wer leitet, kann selbst mitspielen.</p>
       <button class="btn" type="button" data-act="host">Neues Spiel eröffnen</button>
       <button class="btn" type="button" data-act="resume" id="mp-resume" hidden></button>`,
     'p-wait': () => `<p class="mp-net" id="mp-net"></p>
@@ -2420,21 +2466,36 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       </div>
       <label class="field">Spielart<select id="mp-mo"><option value="b">Blind, mit Probe-Rechnungen</option><option value="o">Offene Karten</option></select></label>
       <label class="field">Probe-Rechnungen je Person<select id="mp-pr">${[0, 1, 2, 3, 5].map(n => `<option value="${n}">${n ? n : 'keine, nur blind'}</option>`).join('')}</select></label>
+      <label class="live"><input type="checkbox" id="mp-hp"> Selbst mitspielen</label>
+      <label class="field" id="mp-hn-row">Name in der Rangliste<input id="mp-hn" maxlength="16" autocomplete="nickname"></label>
+      <p class="mp-note" id="mp-hp-note">Ihr Entwurf ist während der Runde auf dem Beamer zu sehen.</p>
       <button class="btn primary" type="button" data-act="start">Runde ${mp.g.rid + 1} starten</button>
       <h3>Gesamtwertung</h3><div id="mp-score"></div>
       <button class="btn" type="button" data-act="end">Spiel beenden</button>`,
     'h-design': () => `<p class="mp-net" id="mp-net"></p>
       <p><b>Runde ${mp.g.rid}: ${esc(partName(st.def))}</b> läuft, ${mp.g.mo === 'o' ? 'offene Karten'
         : mp.g.pr ? `je Person ${mp.g.pr === 1 ? 'eine Probe-Rechnung' : `${mp.g.pr} Probe-Rechnungen`}` : 'ohne Probe-Rechnung'}.</p>
+      ${!mp.hp ? '' : mp.broken ? '<p><span class="t-bad">Bruch.</span> Ihr Bauteil hat versagt.</p>' : '<p><b>Ihr Entwurf ist abgegeben.</b></p>'}
       <p id="mp-msg"></p>
       <ul class="chips" id="mp-chips"></ul>
       ${mp.g.mo === 'o' ? '<p class="mp-note">Zahl hinter dem Namen: bisher entfernt. Grün heißt aufgehört, rot heißt Bruch.</p>'
         : mp.g.pr ? '<p class="mp-note">Punkte hinter den Namen: gefüllt heißt Probe verbraucht. Grün heißt abgegeben.</p>' : ''}
       <button class="btn primary" type="button" data-act="now">Jetzt auflösen</button>`,
+    'h-play': () => SIDE['p-design']() + `<ul class="chips" id="mp-chips"></ul>
+      <button class="btn" type="button" data-act="now">Jetzt auflösen</button>`,
     'h-reveal': () => `<p class="mp-net" id="mp-net"></p>
       <p><b>Auflösung Runde ${mp.g.rid}.</b> Die Entwürfe werden nacheinander aufgedeckt, der gewagteste zuletzt.</p>
+      <p class="mp-note" id="mp-hint"></p>
       <button class="btn primary" type="button" data-act="next">Nächste Runde</button>
       <button class="btn" type="button" data-act="end">Spiel beenden</button>`,
+    'h-zoom': () => `<p class="mp-net" id="mp-net"></p>
+      <p id="mp-zoom"></p>
+      <div class="actions">
+        <button class="btn" type="button" data-act="zprev">Vorheriger</button>
+        <button class="btn" type="button" data-act="znext">Nächster</button>
+      </div>
+      <button class="btn primary" type="button" data-act="zback">Alle Entwürfe</button>
+      <button class="btn" type="button" data-act="next">Nächste Runde</button>`,
   };
   const BOARD = {
     start: () => `<h2>Wettkampf</h2>
@@ -2449,9 +2510,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       <p id="mp-join"></p>
       <h2 id="mp-count"></h2>
       <ul class="chips" id="mp-chips"></ul>`,
+    // Karten im Raster mit etwa Wurzel aus der Anzahl Spalten: wenige Entwürfe werden groß
     'h-reveal': () => `<h2>Runde ${mp.g.rid}: ${esc(partName(st.def))}</h2>
-      <div class="cards" id="mp-cards">${(mp.order || []).map((e, i) =>
-        `<div class="card" data-i="${i}"><canvas></canvas><div class="nm">${esc(e.name)}</div><div class="vl"></div></div>`).join('')}</div>
+      <div class="cards" id="mp-cards" style="--cols: ${Math.ceil(Math.sqrt((mp.order || []).length)) || 1}">${(mp.order || []).map((e, i) =>
+        `<div class="card" data-act="zoom" data-i="${i}"><canvas></canvas>` +
+        `<div class="cap"><span class="nm">${esc(e.name)}</span><span class="vd"></span></div><div class="vl"></div></div>`).join('')}</div>
       <div class="split" id="mp-final"></div>`,
   };
 
@@ -2469,7 +2532,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       $('mp-board').innerHTML = show ? '' : BOARD[scr]();
       $('drawing').hidden = !show;
       $('mp-board').hidden = show;
-      $('tools').hidden = scr !== 'p-design';
+      $('tools').hidden = scr !== 'p-design' && scr !== 'h-play';
       if (scr === 'start') {
         const n = store.get('name'), h = normCode(location.hash.slice(1));
         if (typeof n === 'string') $('mp-name').value = n;
@@ -2483,6 +2546,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
         const syncPr = () => { $('mp-pr').disabled = $('mp-mo').value === 'o'; };   // offene Karten brauchen keine Proben
         $('mp-mo').onchange = syncPr;
         syncPr();
+        const n = store.get('name'), syncHp = () => { $('mp-hn-row').hidden = $('mp-hp-note').hidden = !$('mp-hp').checked; };
+        $('mp-hp').checked = mp.hp;
+        $('mp-hn').value = mp.name || (typeof n === 'string' ? n : '');
+        $('mp-hp').onchange = syncHp;
+        syncHp();
       }
       if (scr === 'h-reveal') showCards(true);
       if (show) requestAnimationFrame(() => { if (wrap.clientWidth) { layout(); render(); } });
@@ -2506,7 +2574,7 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     const chips = mark => ps.map(p => `<li class="${mark && done(p) ? (open && broke(p) ? 'out' : 'done') : ''}">`
       + `${esc(clean(p.presence.n, 16) || 'Jemand')}${!mark ? '' : open ? openInfo(p) : dots(p)}</li>`).join('');
     let left = null;
-    if (scr === 'h-design') left = mp.g.left;
+    if (scr === 'h-design' || scr === 'h-play') left = mp.g.left;
     if (scr === 'p-design' || scr === 'p-locked') { const g = hostG(); left = g ? g.left : null; }
     $('timer').hidden = left == null;
     if (left != null) { $('timer').textContent = mmss(left); $('timer').classList.toggle('low', left <= 10); }
@@ -2524,8 +2592,9 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       set('mp-wait', esc(t)); set('mp-msg', esc(t));
       set('mp-chips', `<li class="done">${esc(mp.name)} (Sie)</li>` + chips(false));
     }
-    if (scr === 'p-design' || scr === 'p-locked') set('mp-msg', `${ps.filter(done).length + (mp.sub ? 1 : 0)} von ${ps.length + 1} haben abgegeben.`);
-    if (scr === 'p-design') {
+    if (scr === 'p-design' || scr === 'p-locked' || scr === 'h-play') set('mp-msg', `${ps.filter(done).length + (mp.sub ? 1 : 0)} von ${ps.length + 1} haben abgegeben.`);
+    if (scr === 'h-play') set('mp-chips', chips(true));
+    if (scr === 'p-design' || scr === 'h-play') {
       const b = $('mp-probe-btn');
       if (b) { b.textContent = `Probe-Rechnung (${st.probes})`; b.disabled = !st.probes || !editable(); }
       set('mp-probe', st.open ? esc(st.liveText || '') : st.phase === 'probe' && st.probeText ? esc(st.probeText) : '');
@@ -2551,14 +2620,25 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       set('mp-warn', mp.conflict ? 'In diesem Raum leitet schon jemand anderes. Bitte ein neues Spiel eröffnen.' : '');
     }
     if (scr === 'h-design') {
-      const nb = ps.filter(broke).length;
-      set('mp-msg', open ? `${ps.filter(done).length} von ${ps.length} fertig${nb ? `, davon ${nb} mit Bruch` : ''}.`
-        : `${ps.filter(done).length} von ${ps.length} haben abgegeben.`);
+      const me = mp.hp ? 1 : 0, nb = ps.filter(broke).length + (mp.hp && mp.broken ? 1 : 0);   // die mitspielende Spielleitung hat schon abgegeben
+      set('mp-msg', open ? `${ps.filter(done).length + me} von ${ps.length + me} fertig${nb ? `, davon ${nb} mit Bruch` : ''}.`
+        : `${ps.filter(done).length + me} von ${ps.length + me} haben abgegeben.`);
       set('mp-chips', chips(true));
     }
     if (scr === 'h-reveal' && mp.order && mp.shown >= mp.order.length) {
       set('mp-final', `<div><h2>Rangliste</h2>${rankHtml(mp.snap, '', esoNow())}</div>` +
         `<div><h2>Gesamtwertung</h2>${scoreHtml(validSc(scoreList()))}</div>`);
+      if (mp.order.length) {
+        $('mp-cards').classList.add('all');
+        set('mp-hint', 'Für die große Ansicht einen Entwurf anklicken, mit den Pfeiltasten blättern.');
+      }
+    }
+    $('zoomhead').hidden = scr !== 'h-zoom';
+    if (scr === 'h-zoom') {
+      const e = mp.order[mp.zoom], r = e.res;
+      set('zoomhead', `<span class="nm">${esc(e.name)}</span> <span class="${e.ok ? 't-ok' : 't-bad'}">${e.ok ? 'Hält' : 'Hält nicht'}</span>` +
+        `<span class="zs">${fmt(e.rem, 1)} % entfernt. ${e.ok ? `Max. Auslastung ${fmt(100 * r.maxUtil)} %.` : failWhy(r)}</span>`);
+      set('mp-zoom', `Entwurf ${mp.zoom + 1} von ${mp.order.length}. Pfeiltasten blättern, Esc zeigt wieder alle.`);
     }
     panel();
   }
@@ -2580,10 +2660,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   }
 
   const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
-    leave: () => leaveRoom(false), end: () => leaveRoom(true), start: hostStart, now: hostEndNow, next: hostNext };
+    leave: () => leaveRoom(false), end: () => leaveRoom(true), start: hostStart, now: hostEndNow, next: hostNext,
+    zoom: b => zoomTo(+b.dataset.i), zprev: () => zoomTo(mp.zoom - 1), znext: () => zoomTo(mp.zoom + 1), zback: zoomEnd };
   for (const id of ['mp-ui', 'mp-board']) $(id).addEventListener('click', e => {
     const b = e.target.closest('[data-act]');
-    if (b && !b.disabled && ACTS[b.dataset.act]) ACTS[b.dataset.act]();
+    if (b && !b.disabled && ACTS[b.dataset.act]) ACTS[b.dataset.act](b);
   });
   $('mp-ui').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target.id === 'mp-name' || e.target.id === 'mp-code')) joinRoom(); });
   $('m-solo').onclick = () => setMode(false);
@@ -2744,6 +2825,12 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     // R, P, E, L wählen das Werkzeug, solange nicht in ein Eingabefeld getippt wird;
     // + und − schalten die Linie auf Hinzufügen oder Entfernen, 1 bis 3 wählen ihre Dicke (beides wählt auch die Linie)
     if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || st.phase === 'edit') return;
+    // Auflösung am Beamer: Pfeiltasten öffnen und blättern die große Ansicht, Esc zeigt wieder alle Entwürfe
+    if (mp.role === 'host' && mp.g.ph === 'reveal' && mp.order && mp.order.length && mp.shown >= mp.order.length) {
+      const d = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+      if (d) { e.preventDefault(); zoomTo(mp.zoom == null ? (d > 0 ? 0 : -1) : mp.zoom + d); return; }
+      if (e.key === 'Escape' && mp.zoom != null) { zoomEnd(); return; }
+    }
     const key = e.key.toLowerCase(), tool = { r: 'rect', p: 'brush', e: 'corner', l: 'line' }[key];
     if (tool) setTool(tool);
     else if (key === '+' || key === '-') setLine({ add: key === '+' });
