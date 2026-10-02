@@ -75,7 +75,7 @@
   const loadLabel = ld => ld.unknown ? 'F = ?' : `F = ${fmt(kN(ld), kN(ld) % 1 ? 1 : 0)} kN`;
   // Schriftfeld: eine Last als „F = …“, mehrere als Anzahl und Beträge
   const loadText = d => d.loads.length === 1 ? loadLabel(d.loads[0])
-    : `${d.loads.length} Lasten: ${d.loads.map(l => fmt(kN(l), kN(l) % 1 ? 1 : 0)).join(', ')} kN`;
+    : `${d.loads.length} Lasten: ${d.loads.map(l => `${fmt(kN(l), kN(l) % 1 ? 1 : 0)} kN`).join(', ')}`;
   const OUT = { left: [-1, 0], right: [1, 0], top: [0, 1], bottom: [0, -1] };
   // Kante einer Lager- oder Lastgruppe in Kacheln, y nach oben: Enden a und b, Mitte p, Normale n nach außen
   function sideOf(grp) {
@@ -89,10 +89,11 @@
   function arrow(ld) {
     const { p, n } = sideOf(ld), F = Math.hypot(ld.fx, ld.fy), f = [ld.fx / F, ld.fy / F], d = f[0] * n[0] + f[1] * n[1];
     let tip, tail;
-    if (d > 0.3) { tail = [p[0] + n[0] * 0.12, p[1] + n[1] * 0.12]; tip = [tail[0] + f[0] * 2.2, tail[1] + f[1] * 2.2]; }
+    const L = ld.len || 2.2;   // Pfeillänge in Kacheln; im Baukasten nach dem Betrag
+    if (d > 0.3) { tail = [p[0] + n[0] * 0.12, p[1] + n[1] * 0.12]; tip = [tail[0] + f[0] * L, tail[1] + f[1] * L]; }
     else {
       const off = d < -0.3 ? 0.08 : 0.45;
-      tip = [p[0] + n[0] * off, p[1] + n[1] * off]; tail = [tip[0] - f[0] * 2.2, tip[1] - f[1] * 2.2];
+      tip = [p[0] + n[0] * off, p[1] + n[1] * off]; tail = [tip[0] - f[0] * L, tip[1] - f[1] * L];
     }
     const o = d > 0.3 ? tip : tail;
     let lab;
@@ -897,6 +898,10 @@
     const view = PARTS.shape({ ...edRaw(false), auto: false });
     view.margin = [3, 4, 3, 4];   // feste Ränder, damit beim Bauen nichts springt
     if (ed.auto && !d) for (const l of view.loads) l.unknown = true;
+    else {   // Pfeillänge nach Betrag, die größte Last so lang wie sonst
+      const top = Math.max(...ed.loads.map(l => l.kn));
+      view.loads.forEach((l, i) => { l.len = Math.max(0.8, 2.2 * ed.loads[i].kn / top); });
+    }
     st.def = view; st.L = FEM.level(view); st.solid = ed.cells;
     const ready = d && (ed.auto ? `${ed.loads.length > 1 ? 'Die Lasten sind' : 'Die Last ist'} so bemessen, dass das Vollteil zu ${fmt(100 * d.util)} % ausgelastet ist.`
       : `Das Vollteil ist zu ${fmt(100 * d.util)} % ausgelastet.`);
@@ -944,7 +949,7 @@
       ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.strokeRect(G.ox + x * s + 1, G.oy - (y + 1) * s + 1, s - 2, s - 2);
     }
     // Kanten, auf die das Werkzeug wirken würde, mit „Last“ dazu die gewählte Last
-    const keys = ed.tool === 'form' ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand') : ed.hover ? [ed.hover] : [];
+    const keys = ed.tool === 'form' || (d && d.load != null) ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand') : ed.hover ? [ed.hover] : [];
     if (ed.tool === 'last' && ed.loads[ed.sel]) keys.push(...ed.loads[ed.sel].keys);
     ctx.save(); ctx.strokeStyle = C.accent; ctx.lineWidth = Math.max(3, s * 0.16); ctx.lineCap = 'round'; ctx.beginPath();
     for (const key of keys) {
@@ -1008,11 +1013,31 @@
       ed.sel = ed.loads.length - 1;
     }
   }
+  // Lastpfeil am Zeiger: Index der Last, wenn der Zeiger am äußeren Teil eines Pfeils liegt (dort lässt er sich ziehen)
+  function edArrowAt([px, py]) {
+    let best = -1, bd = 0.45;
+    st.def.loads.forEach((ld, i) => {
+      const g = arrow(ld), a = g.o === g.tip ? g.tail : g.tip, vx = g.o[0] - a[0], vy = g.o[1] - a[1];   // vom Bauteil nach außen
+      const t = Math.max(0, Math.min(1, ((px - a[0]) * vx + (py - a[1]) * vy) / (vx * vx + vy * vy)));
+      const dist = Math.hypot(px - a[0] - t * vx, py - a[1] - t * vy);
+      if (t > 0.3 && dist < bd) { bd = dist; best = i; }
+    });
+    return best;
+  }
+  // Betrag beim Ziehen auf handliche Stufen: bis 5 kN in 0,5, bis 20 kN in 1, bis 50 kN in 2,5, darüber in 5
+  const niceKn = v => { const q = v < 5 ? 0.5 : v < 20 ? 1 : v < 50 ? 2.5 : 5; return Math.min(100, Math.max(0.5, Math.round(v / q) * q)); };
   cv.addEventListener('pointerdown', e => {
     if (st.phase !== 'edit') return;
     e.preventDefault();
     cv.setPointerCapture(e.pointerId);
-    const p = edPos(e);
+    const p = edPos(e), ai = ed.tool === 'last' ? edArrowAt(p) : -1;
+    if (ai >= 0) {   // Pfeil gefasst: Länge ändert den Betrag, Richtung bleibt
+      const g = arrow(st.def.loads[ai]), a = g.o === g.tip ? g.tail : g.tip, len = Math.hypot(g.o[0] - a[0], g.o[1] - a[1]);
+      ed.drag = { load: ai, a, u: [(g.o[0] - a[0]) / len, (g.o[1] - a[1]) / len], k: ed.loads[ai].kn / len };   // k: kN je Kachel Pfeil
+      ed.sel = ai;
+      cv.classList.add('grabbing'); ledRender(); render();
+      return;
+    }
     if (ed.tool === 'form') { const c = edCell(p); ed.drag = { a: c, b: c, v: edHas(...c) ? 0 : 1 }; }
     else { const k = edEdge(p, e.pointerType === 'touch'); ed.drag = k ? { a: k, b: k } : null; }
     render();
@@ -1020,25 +1045,37 @@
   cv.addEventListener('pointermove', e => {
     if (st.phase !== 'edit') return;
     const p = edPos(e), d = ed.drag;
+    if (d && d.load != null) {
+      const kn = niceKn(Math.max(0.25, (p[0] - d.a[0]) * d.u[0] + (p[1] - d.a[1]) * d.u[1]) * d.k), l = ed.loads[d.load], vl = st.def.loads[d.load];
+      if (kn !== l.kn) {
+        const f = kn * 1000 / Math.hypot(vl.fx, vl.fy);
+        l.kn = kn; vl.fx *= f; vl.fy *= f; vl.len = kn / d.k; delete vl.unknown;
+        ed.auto = false;   // gezogener Betrag gilt, die Automatik ist damit aus
+        ledRender(); render();
+      }
+      return;
+    }
     if (d) {
       const b = ed.tool === 'form' ? edCell(p) : edEdge(p, e.pointerType === 'touch') || d.b;
       if (String(b) !== String(d.b)) { d.b = b; render(); }
       return;
     }
     const h = ed.tool === 'form' ? edCell(p) : edEdge(p);
+    cv.classList.toggle('grab', ed.tool === 'last' && edArrowAt(p) >= 0);
     if (String(h) !== String(ed.hover)) { ed.hover = h; render(); }
   });
   cv.addEventListener('pointerup', () => {
     const d = ed.drag;
     if (st.phase !== 'edit' || !d) return;
     ed.drag = null;
+    if (d.load != null) { cv.classList.remove('grabbing'); return edUpdate(); }
     if (ed.tool === 'form') {
       for (let y = Math.min(d.a[1], d.b[1]); y <= Math.max(d.a[1], d.b[1]); y++)
         for (let x = Math.min(d.a[0], d.b[0]); x <= Math.max(d.a[0], d.b[0]); x++) ed.cells[x + y * ED_TX] = d.v;
     } else edApply(edRun(d.a, d.b, ed.tool === 'wand'), d.a === d.b);
     edUpdate();
   });
-  cv.addEventListener('pointerleave', () => { if (st.phase === 'edit' && ed.hover) { ed.hover = null; render(); } });
+  cv.addEventListener('pointerleave', () => { cv.classList.remove('grab'); if (st.phase === 'edit' && ed.hover) { ed.hover = null; render(); } });
   $('etools').onclick = e => {
     const b = e.target.closest('button');
     if (!b) return;
