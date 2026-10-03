@@ -65,6 +65,7 @@
   // Ohne Ticket bleiben der Kursmodus mit dem verlinkten Bauteil, Herausforderungen (nur dieses Bauteil) und das
   // Beitreten zu einem Wettkampf; einen Wettkampf eröffnen nur mit Ticket.
   let frei = null;          // Inhalt eines gültigen Tickets
+  let ticketText = null;    // das Ticket selbst, geht mit zum Wettkampf-Server (frei.wk)
   let kursLink = false;     // Kursmodus mit Bauteil aus der Kursseite (#teil, #bau)
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
@@ -1624,6 +1625,8 @@
   const DRAWING = { 'p-design': 1, 'p-locked': 1, 'p-result': 1, 'p-zoom': 1, 'h-design': 1, 'h-play': 1, 'h-zoom': 1 };
   const SIDE = {
     start: () => `<p class="mp-net" id="mp-net"></p>
+      <div class="mp-wk" id="mp-wk" hidden><p>Wettkampf und Mitspielen laufen auf dem Spielserver der HTWK (HTWK-Netz oder VPN). Ihre Freischaltung kommt mit.</p>
+        <a class="btn primary" id="mp-wk-link" href="#">Zum Wettkampf-Server</a></div>
       <h3>Mitspielen</h3>
       <label class="field">Name, ein Pseudonym genügt<input id="mp-name" maxlength="16" autocomplete="nickname"></label>
       <label class="field">Raumcode<input id="mp-code" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
@@ -1799,6 +1802,10 @@
       if (b) b.hidden = !r;
       if (b && r) b.textContent = `Spiel ${r.code} fortsetzen (nach Runde ${r.rid})`;
       for (const x of document.querySelectorAll('#mp-ui [data-act]')) x.disabled = net.mode === 'none';
+      // Ohne Spielserver (GitHub Pages): mit Freischaltung zum Wettkampf-Server, dessen Adresse im Ticket steht
+      const wk = net.mode === 'none' && frei && /^https:\/\/[\w.-]+\/[\w./-]*$/.test(frei.wk || '') ? frei.wk : '';
+      $('mp-wk').hidden = !wk;
+      if (wk) $('mp-wk-link').href = wk + '#ticket=' + ticketText;
     }
     if (scr === 'p-wait') {
       const g = hostG();
@@ -2178,6 +2185,7 @@
   if (linkTicket) store.set('ticket', linkTicket[1]);
   const ticket = linkTicket ? linkTicket[1] : store.get('ticket');
   frei = TICKET.lesen(ticket);
+  ticketText = ticket;
   // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen).
   // Im Kursmodus nur das verlinkte Bauteil (#teil, #bau); ohne Freischaltung nur Herausforderung und Raumcode
   const hash = linkTicket ? '' : location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
