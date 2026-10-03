@@ -61,6 +61,11 @@
   const KURS = new URLSearchParams(location.search).has('kurs');
   const KURS_PROBEN = 3;   // Probe-Rechnungen je Versuch im Kurs (sonst eine); ohne Lösung des Algorithmus
   const KURS_NAME = (new URLSearchParams(location.search).get('kurs') || '').replace(/[<>&"]/g, '').slice(0, 40);   // ?kurs=Lenker
+  // Freischaltung (src/ticket.js): Das ganze Spiel gibt es mit einem Ticket aus dem FEM-Kurs (Link mit #ticket=…).
+  // Ohne Ticket bleiben der Kursmodus mit dem verlinkten Bauteil, Herausforderungen (nur dieses Bauteil) und das
+  // Beitreten zu einem Wettkampf; einen Wettkampf eröffnen nur mit Ticket.
+  let frei = null;          // Inhalt eines gültigen Tickets
+  let kursLink = false;     // Kursmodus mit Bauteil aus der Kursseite (#teil, #bau)
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
     eso: {}, esoRun: null, animId: 0, busy: false };
@@ -1625,9 +1630,10 @@
       <button class="btn primary" type="button" data-act="join">Beitreten</button>
       <p class="mp-warn" id="mp-msg"></p>
       <h3>Spiel leiten</h3>
-      <p>Für Leinwand oder Beamer: Raum eröffnen, Bauteil und Zeit wählen, Runden starten. Wer leitet, kann selbst mitspielen.</p>
+      ${frei ? `<p>Für Leinwand oder Beamer: Raum eröffnen, Bauteil und Zeit wählen, Runden starten. Wer leitet, kann selbst mitspielen.</p>
       <button class="btn" type="button" data-act="host">Neues Spiel eröffnen</button>
-      <button class="btn" type="button" data-act="resume" id="mp-resume" hidden></button>`,
+      <button class="btn" type="button" data-act="resume" id="mp-resume" hidden></button>`
+      : '<p>Ein Spiel eröffnen können Lehrende und alle, die Knackpunkt im FEM-Kurs freigeschaltet haben.</p>'}`,
     'p-wait': () => `<p class="mp-net" id="mp-net"></p>
       <p>Raum <b>${esc(mp.code)}</b>, Sie spielen als <b>${esc(mp.name)}</b>.</p>
       <p id="mp-msg"></p>
@@ -1790,8 +1796,8 @@
 
     if (scr === 'start') {
       const r = savedHost(), b = $('mp-resume');
-      b.hidden = !r;
-      if (r) b.textContent = `Spiel ${r.code} fortsetzen (nach Runde ${r.rid})`;
+      if (b) b.hidden = !r;
+      if (b && r) b.textContent = `Spiel ${r.code} fortsetzen (nach Runde ${r.rid})`;
       for (const x of document.querySelectorAll('#mp-ui [data-act]')) x.disabled = net.mode === 'none';
     }
     if (scr === 'p-wait') {
@@ -1862,16 +1868,35 @@
     mp.on = on;
     $('m-solo').setAttribute('aria-pressed', String(!on));
     $('m-mp').setAttribute('aria-pressed', String(on));
-    $('levels').hidden = on; $('solo-ui').hidden = on; $('mp-ui').hidden = !on;
+    $('levels').hidden = on || !frei; $('solo-ui').hidden = on; $('mp-ui').hidden = !on;
     $('live').checked = false;   // im Wettkampf keine Spannungen vorab
-    if (on) { duel = null; duelRender(); mpScr = ''; netStart(); mpRender(); return; }
+    if (on) { sperre(false); duel = null; duelRender(); mpScr = ''; netStart(); mpRender(); return; }
     leaveRoom(false);
     $('drawing').hidden = false; $('mp-board').hidden = true; $('timer').hidden = true; $('tools').hidden = false;
     st.open = soloOpen;
     reload();
+    sperre(gesperrt());
   }
 
-  const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
+  // Ohne Freischaltung steht statt „Allein üben“ der Hinweis auf den Kurs (Herausforderung und Kursmodus ausgenommen)
+  const gesperrt = () => !frei && !duel && !kursLink;
+  function sperre(an) {
+    $('sperre').hidden = !an;
+    document.querySelector('.stage').hidden = an;
+  }
+  // p: Ergebnis der Prüfung (null, solange sie läuft oder ohne Ticket)
+  function freiZeigen(p) {
+    const datum = t => new Date(t * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    $('frei').hidden = !frei || KURS;
+    if (frei) $('frei').textContent = `Freigeschaltet über den FEM-Kurs${frei.name ? ' für ' + frei.name : ''}, bis ${datum(frei.exp)}`;
+    $('sperre-grund').hidden = !(p && p.abgelaufen);
+    if (p && p.abgelaufen) $('sperre-grund').textContent = `Ihre Freischaltung ist am ${datum(p.exp)} abgelaufen. Ein neues Ticket gibt es auf der Kursseite.`;
+    $('levels').hidden = mp.on || !frei;
+    $('b-next').hidden = KURS || !frei;
+    if (mp.on) { mpScr = ''; mpRender(); } else sperre(gesperrt());
+  }
+
+  const ACTS = { join: joinRoom, host: () => frei && hostGame(false), resume: () => frei && hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
     leave: () => leaveRoom(false), end: () => leaveRoom(true), start: hostStart, now: hostEndNow, next: hostNext,
     zoom: b => zoomTo(+b.dataset.i), zprev: () => zoomTo(mp.zoom - 1), znext: () => zoomTo(mp.zoom + 1), zback: zoomEnd,
     all: playerAll, mine: playerMine };
@@ -2148,19 +2173,31 @@
     new ResizeObserver(hoehe).observe(document.body);
     hoehe();
   }
-  // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen)
-  const hash = location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
-  duel = parseDuel(hash);
+  // Ticket aus dem Link merken; vorläufig gilt es nach seinem Inhalt, die Signatur wird gleich danach geprüft
+  const linkTicket = /^#ticket=([\w-]+\.[\w-]+\.[\w-]+)$/.exec(location.hash);
+  if (linkTicket) store.set('ticket', linkTicket[1]);
+  const ticket = linkTicket ? linkTicket[1] : store.get('ticket');
+  frei = TICKET.lesen(ticket);
+  // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen).
+  // Im Kursmodus nur das verlinkte Bauteil (#teil, #bau); ohne Freischaltung nur Herausforderung und Raumcode
+  const hash = linkTicket ? '' : location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
   const clearHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch {} };
+  if (linkTicket) clearHash();
+  duel = KURS ? null : parseDuel(hash);
+  kursLink = KURS && !!(linkTeil || (linkBau && PARTS.fromCode(linkBau[1])));
   if (duel) {
     soloOpen = st.open = duel.open;
     $('g-blind').setAttribute('aria-pressed', String(!duel.open)); $('g-open').setAttribute('aria-pressed', String(duel.open));
     loadLevel(...duel.part);
-  } else if (linkNr) loadLevel(RANDOM, +linkNr[1]);
-  else if (linkBau && PARTS.fromCode(linkBau[1])) loadLevel(CUSTOM, linkBau[1]);
-  else if (linkTeil) { loadLevel(+linkTeil[1] - 1); clearHash(); }
-  else if (hash === '#zufall') loadLevel(RANDOM, newNr());
-  else if (hash === '#bauen') { loadLevel(1); openEditor(); clearHash(); }
+  } else if (linkNr && frei) loadLevel(RANDOM, +linkNr[1]);
+  else if (linkBau && PARTS.fromCode(linkBau[1]) && (frei || kursLink)) loadLevel(CUSTOM, linkBau[1]);
+  else if (linkTeil && (frei || kursLink)) { loadLevel(+linkTeil[1] - 1); clearHash(); }
+  else if (hash === '#zufall' && frei) loadLevel(RANDOM, newNr());
+  else if (hash === '#bauen' && frei) { loadLevel(1); openEditor(); clearHash(); }
   else loadLevel(0);
-  if (/^#[A-Za-z0-9]{4}$/.test(location.hash)) setMode(true);   // Einladungslink mit Raumcode
+  if (/^#[A-Za-z0-9]{4}$/.test(hash)) setMode(true);   // Einladungslink mit Raumcode
+  freiZeigen(null);
+  TICKET.pruefen(ticket).then(p => { frei = p && !p.abgelaufen ? p : null; freiZeigen(p); });
+  // Ticket-Link in ein schon offenes Spiel: neu laden, damit es wie beim ersten Aufruf übernommen wird
+  addEventListener('hashchange', () => { if (/^#ticket=/.test(location.hash)) location.reload(); });
 })();

@@ -58,6 +58,14 @@ canvas.grabbing { cursor: grabbing; }
   transform: rotate(-8deg); opacity: 0.9; mix-blend-mode: var(--stamp-blend); }
 .stamp.ok { color: var(--ok); }
 .stamp.bad { color: var(--bad); }
+/* Ohne Freischaltung: Hinweis auf den FEM-Kurs statt „Allein üben“; mit Freischaltung eine Zeile unter dem Untertitel */
+.sperre { justify-self: center; width: min(640px, 100% - 10px); box-sizing: border-box; display: grid; gap: 12px; padding: 22px 24px 20px; }
+.sperre h2 { margin: 0; font: 800 clamp(30px, 4.5vw, 44px)/1 var(--f-display); letter-spacing: 0.03em; text-transform: uppercase; }
+.sperre p { margin: 0; }
+.sperre .btn.primary { display: inline-block; text-decoration: none; }
+.sperre-grund { color: var(--bad); font-weight: 600; }
+.sperre-note { color: var(--ink2); font-size: 14px; }
+.frei { display: block; margin-top: 2px; color: var(--ok); font: 600 13px var(--f-body); }
 .stamp.hit { animation: stamp 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.25) both; }
 @keyframes stamp { from { transform: rotate(-8deg) scale(2.3); opacity: 0; } to { transform: rotate(-8deg) scale(1); opacity: 0.9; } }
 .timer { position: absolute; top: 6px; left: 6px; pointer-events: none; font: 600 clamp(22px, 3.4vw, 36px)/1 var(--f-mono);
@@ -177,7 +185,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 <div class="app">
   <header class="top">
     <h1 class="brand">Knackpunkt</h1>
-    <p class="claim">Wie viel Material darf weg, bevor das Bauteil versagt?</p>
+    <p class="claim">Wie viel Material darf weg, bevor das Bauteil versagt?<span class="frei" id="frei" hidden></span></p>
     <div class="nav">
       <nav class="modes" aria-label="Spielart">
         <button type="button" id="m-solo" aria-pressed="true">Allein üben</button>
@@ -325,11 +333,20 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
       <div id="mp-ui" class="mp-box" aria-live="polite" hidden></div>
     </aside>
   </main>
+
+  <section class="sheet sperre" id="sperre" hidden>
+    <h2>Knackpunkt freischalten</h2>
+    <p>Das ganze Spiel ist die Belohnung im FEM-Kurs Strukturmechanik der HTWK Leipzig: Wer dort alle Aufgaben der vier Praktika bearbeitet hat, schaltet es mit der OPAL-Anmeldung auf der Kursseite frei.</p>
+    <p class="sperre-grund" id="sperre-grund" hidden></p>
+    <p><a class="btn primary" href="https://prof-schoenfelder-lab.github.io/Strukturmechanik/">Zur Kursseite</a></p>
+    <p class="sperre-note">Auch ohne Freischaltung: Herausforderungen von Kommilitonen annehmen und unter „Mehrspieler“ einem Wettkampf mit Raumcode beitreten.</p>
+  </section>
 </div>
 
 <script>
 <!--FEM-->
 <!--PARTS-->
+<!--TICKET-->
 </script>
 <script>
 <!--GAME-->

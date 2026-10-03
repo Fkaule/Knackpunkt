@@ -63,6 +63,14 @@ canvas.grabbing { cursor: grabbing; }
   transform: rotate(-8deg); opacity: 0.9; mix-blend-mode: var(--stamp-blend); }
 .stamp.ok { color: var(--ok); }
 .stamp.bad { color: var(--bad); }
+/* Ohne Freischaltung: Hinweis auf den FEM-Kurs statt „Allein üben“; mit Freischaltung eine Zeile unter dem Untertitel */
+.sperre { justify-self: center; width: min(640px, 100% - 10px); box-sizing: border-box; display: grid; gap: 12px; padding: 22px 24px 20px; }
+.sperre h2 { margin: 0; font: 800 clamp(30px, 4.5vw, 44px)/1 var(--f-display); letter-spacing: 0.03em; text-transform: uppercase; }
+.sperre p { margin: 0; }
+.sperre .btn.primary { display: inline-block; text-decoration: none; }
+.sperre-grund { color: var(--bad); font-weight: 600; }
+.sperre-note { color: var(--ink2); font-size: 14px; }
+.frei { display: block; margin-top: 2px; color: var(--ok); font: 600 13px var(--f-body); }
 .stamp.hit { animation: stamp 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.25) both; }
 @keyframes stamp { from { transform: rotate(-8deg) scale(2.3); opacity: 0; } to { transform: rotate(-8deg) scale(1); opacity: 0.9; } }
 .timer { position: absolute; top: 6px; left: 6px; pointer-events: none; font: 600 clamp(22px, 3.4vw, 36px)/1 var(--f-mono);
@@ -182,7 +190,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
 <div class="app">
   <header class="top">
     <h1 class="brand">Knackpunkt</h1>
-    <p class="claim">Wie viel Material darf weg, bevor das Bauteil versagt?</p>
+    <p class="claim">Wie viel Material darf weg, bevor das Bauteil versagt?<span class="frei" id="frei" hidden></span></p>
     <div class="nav">
       <nav class="modes" aria-label="Spielart">
         <button type="button" id="m-solo" aria-pressed="true">Allein üben</button>
@@ -330,6 +338,14 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
       <div id="mp-ui" class="mp-box" aria-live="polite" hidden></div>
     </aside>
   </main>
+
+  <section class="sheet sperre" id="sperre" hidden>
+    <h2>Knackpunkt freischalten</h2>
+    <p>Das ganze Spiel ist die Belohnung im FEM-Kurs Strukturmechanik der HTWK Leipzig: Wer dort alle Aufgaben der vier Praktika bearbeitet hat, schaltet es mit der OPAL-Anmeldung auf der Kursseite frei.</p>
+    <p class="sperre-grund" id="sperre-grund" hidden></p>
+    <p><a class="btn primary" href="https://prof-schoenfelder-lab.github.io/Strukturmechanik/">Zur Kursseite</a></p>
+    <p class="sperre-note">Auch ohne Freischaltung: Herausforderungen von Kommilitonen annehmen und unter „Mehrspieler“ einem Wettkampf mit Raumcode beitreten.</p>
+  </section>
 </div>
 
 <script>
@@ -1030,6 +1046,39 @@ const PARTS = (FEM => {
 })(typeof module !== 'undefined' ? require('./fem.js') : FEM);
 if (typeof module !== 'undefined') module.exports = PARTS;
 
+/* Freischaltung über den FEM-Kurs Strukturmechanik: Wer dort alle Aufgaben aller Praktika bearbeitet hat,
+   bekommt vom Kurs-Backend ein persönliches, befristetes Ticket (JWT, ES256). Geprüft wird es hier mit dem
+   öffentlichen Schlüssel des Backends (GET /fem/api/kp/schluessel). Kein DOM. */
+const TICKET = (() => {
+  const SCHLUESSEL = { kty: 'EC', crv: 'P-256', x: 'zCk5eWh-df-PrmWK7UEoi_RcuqgoIuBpW0kMh0MJl_w', y: 'Nq5DlGE3JuLeYoUyT-_t0XyZZKiBscL2K6ejTMUtljg' };
+  const bytes = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  const json = s => JSON.parse(new TextDecoder().decode(bytes(s)));
+
+  // Inhalt ohne Prüfung der Signatur, nur für den ersten Bildaufbau; null, wenn unlesbar oder abgelaufen
+  function lesen(ticket, jetzt = Date.now() / 1000) {
+    try {
+      const p = json(String(ticket).split('.')[1]);
+      return p.aud === 'knackpunkt' && p.exp > jetzt ? p : null;
+    } catch { return null; }
+  }
+  // Inhalt, wenn die Signatur stimmt (nach Ablauf mit abgelaufen: true), sonst null
+  async function pruefen(ticket, jetzt = Date.now() / 1000, schluessel = SCHLUESSEL) {
+    try {
+      const [kopf, inhalt, sig] = String(ticket).split('.');
+      if (json(kopf).alg !== 'ES256') return null;
+      const key = await crypto.subtle.importKey('jwk', schluessel, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+      const ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, bytes(sig),
+        new TextEncoder().encode(kopf + '.' + inhalt));
+      const p = json(inhalt);
+      if (!ok || p.aud !== 'knackpunkt') return null;
+      return p.exp > jetzt ? p : { ...p, abgelaufen: true };
+    } catch { return null; }
+  }
+
+  return { lesen, pruefen };
+})();
+if (typeof module !== 'undefined') module.exports = TICKET;
+
 </script>
 <script>
 /* Spiel: Entwurf, Aufdecken, Gegner und Wettkampf. Zeichnet auf ein Canvas im Stil einer technischen Zeichnung. */
@@ -1095,6 +1144,11 @@ if (typeof module !== 'undefined') module.exports = PARTS;
   const KURS = new URLSearchParams(location.search).has('kurs');
   const KURS_PROBEN = 3;   // Probe-Rechnungen je Versuch im Kurs (sonst eine); ohne Lösung des Algorithmus
   const KURS_NAME = (new URLSearchParams(location.search).get('kurs') || '').replace(/[<>&"]/g, '').slice(0, 40);   // ?kurs=Lenker
+  // Freischaltung (src/ticket.js): Das ganze Spiel gibt es mit einem Ticket aus dem FEM-Kurs (Link mit #ticket=…).
+  // Ohne Ticket bleiben der Kursmodus mit dem verlinkten Bauteil, Herausforderungen (nur dieses Bauteil) und das
+  // Beitreten zu einem Wettkampf; einen Wettkampf eröffnen nur mit Ticket.
+  let frei = null;          // Inhalt eines gültigen Tickets
+  let kursLink = false;     // Kursmodus mit Bauteil aus der Kursseite (#teil, #bau)
   const st = { li: 0, key: 0, practice: false, def: null, L: null, solid: null, conn: null, undo: [], phase: 'design', probes: 1, open: false,
     res: null, view: { mode: 'blind' }, resultView: null, hover: -1, paint: null, last: null, tool: 'rect', lineAdd: false, lineW: 1, drag: null,
     eso: {}, esoRun: null, animId: 0, busy: false };
@@ -2659,9 +2713,10 @@ if (typeof module !== 'undefined') module.exports = PARTS;
       <button class="btn primary" type="button" data-act="join">Beitreten</button>
       <p class="mp-warn" id="mp-msg"></p>
       <h3>Spiel leiten</h3>
-      <p>Für Leinwand oder Beamer: Raum eröffnen, Bauteil und Zeit wählen, Runden starten. Wer leitet, kann selbst mitspielen.</p>
+      ${frei ? `<p>Für Leinwand oder Beamer: Raum eröffnen, Bauteil und Zeit wählen, Runden starten. Wer leitet, kann selbst mitspielen.</p>
       <button class="btn" type="button" data-act="host">Neues Spiel eröffnen</button>
-      <button class="btn" type="button" data-act="resume" id="mp-resume" hidden></button>`,
+      <button class="btn" type="button" data-act="resume" id="mp-resume" hidden></button>`
+      : '<p>Ein Spiel eröffnen können Lehrende und alle, die Knackpunkt im FEM-Kurs freigeschaltet haben.</p>'}`,
     'p-wait': () => `<p class="mp-net" id="mp-net"></p>
       <p>Raum <b>${esc(mp.code)}</b>, Sie spielen als <b>${esc(mp.name)}</b>.</p>
       <p id="mp-msg"></p>
@@ -2824,8 +2879,8 @@ if (typeof module !== 'undefined') module.exports = PARTS;
 
     if (scr === 'start') {
       const r = savedHost(), b = $('mp-resume');
-      b.hidden = !r;
-      if (r) b.textContent = `Spiel ${r.code} fortsetzen (nach Runde ${r.rid})`;
+      if (b) b.hidden = !r;
+      if (b && r) b.textContent = `Spiel ${r.code} fortsetzen (nach Runde ${r.rid})`;
       for (const x of document.querySelectorAll('#mp-ui [data-act]')) x.disabled = net.mode === 'none';
     }
     if (scr === 'p-wait') {
@@ -2896,16 +2951,35 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     mp.on = on;
     $('m-solo').setAttribute('aria-pressed', String(!on));
     $('m-mp').setAttribute('aria-pressed', String(on));
-    $('levels').hidden = on; $('solo-ui').hidden = on; $('mp-ui').hidden = !on;
+    $('levels').hidden = on || !frei; $('solo-ui').hidden = on; $('mp-ui').hidden = !on;
     $('live').checked = false;   // im Wettkampf keine Spannungen vorab
-    if (on) { duel = null; duelRender(); mpScr = ''; netStart(); mpRender(); return; }
+    if (on) { sperre(false); duel = null; duelRender(); mpScr = ''; netStart(); mpRender(); return; }
     leaveRoom(false);
     $('drawing').hidden = false; $('mp-board').hidden = true; $('timer').hidden = true; $('tools').hidden = false;
     st.open = soloOpen;
     reload();
+    sperre(gesperrt());
   }
 
-  const ACTS = { join: joinRoom, host: () => hostGame(false), resume: () => hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
+  // Ohne Freischaltung steht statt „Allein üben“ der Hinweis auf den Kurs (Herausforderung und Kursmodus ausgenommen)
+  const gesperrt = () => !frei && !duel && !kursLink;
+  function sperre(an) {
+    $('sperre').hidden = !an;
+    document.querySelector('.stage').hidden = an;
+  }
+  // p: Ergebnis der Prüfung (null, solange sie läuft oder ohne Ticket)
+  function freiZeigen(p) {
+    const datum = t => new Date(t * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    $('frei').hidden = !frei || KURS;
+    if (frei) $('frei').textContent = `Freigeschaltet über den FEM-Kurs${frei.name ? ' für ' + frei.name : ''}, bis ${datum(frei.exp)}`;
+    $('sperre-grund').hidden = !(p && p.abgelaufen);
+    if (p && p.abgelaufen) $('sperre-grund').textContent = `Ihre Freischaltung ist am ${datum(p.exp)} abgelaufen. Ein neues Ticket gibt es auf der Kursseite.`;
+    $('levels').hidden = mp.on || !frei;
+    $('b-next').hidden = KURS || !frei;
+    if (mp.on) { mpScr = ''; mpRender(); } else sperre(gesperrt());
+  }
+
+  const ACTS = { join: joinRoom, host: () => frei && hostGame(false), resume: () => frei && hostGame(true), submit: playerSubmit, probe, undo, reset: resetAll,
     leave: () => leaveRoom(false), end: () => leaveRoom(true), start: hostStart, now: hostEndNow, next: hostNext,
     zoom: b => zoomTo(+b.dataset.i), zprev: () => zoomTo(mp.zoom - 1), znext: () => zoomTo(mp.zoom + 1), zback: zoomEnd,
     all: playerAll, mine: playerMine };
@@ -3182,21 +3256,33 @@ if (typeof module !== 'undefined') module.exports = PARTS;
     new ResizeObserver(hoehe).observe(document.body);
     hoehe();
   }
-  // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen)
-  const hash = location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
-  duel = parseDuel(hash);
+  // Ticket aus dem Link merken; vorläufig gilt es nach seinem Inhalt, die Signatur wird gleich danach geprüft
+  const linkTicket = /^#ticket=([\w-]+\.[\w-]+\.[\w-]+)$/.exec(location.hash);
+  if (linkTicket) store.set('ticket', linkTicket[1]);
+  const ticket = linkTicket ? linkTicket[1] : store.get('ticket');
+  frei = TICKET.lesen(ticket);
+  // Links: Zufallsbauteil, eigenes Bauteil, Herausforderung; Einstiege von der Kursseite (#teil-1 bis 3, #zufall, #bauen).
+  // Im Kursmodus nur das verlinkte Bauteil (#teil, #bau); ohne Freischaltung nur Herausforderung und Raumcode
+  const hash = linkTicket ? '' : location.hash, linkNr = /^#nr-([1-9]\d{0,4})$/.exec(hash), linkBau = /^#bau-(.+)$/.exec(hash), linkTeil = /^#teil-([1-3])$/.exec(hash);
   const clearHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch {} };
+  if (linkTicket) clearHash();
+  duel = KURS ? null : parseDuel(hash);
+  kursLink = KURS && !!(linkTeil || (linkBau && PARTS.fromCode(linkBau[1])));
   if (duel) {
     soloOpen = st.open = duel.open;
     $('g-blind').setAttribute('aria-pressed', String(!duel.open)); $('g-open').setAttribute('aria-pressed', String(duel.open));
     loadLevel(...duel.part);
-  } else if (linkNr) loadLevel(RANDOM, +linkNr[1]);
-  else if (linkBau && PARTS.fromCode(linkBau[1])) loadLevel(CUSTOM, linkBau[1]);
-  else if (linkTeil) { loadLevel(+linkTeil[1] - 1); clearHash(); }
-  else if (hash === '#zufall') loadLevel(RANDOM, newNr());
-  else if (hash === '#bauen') { loadLevel(1); openEditor(); clearHash(); }
+  } else if (linkNr && frei) loadLevel(RANDOM, +linkNr[1]);
+  else if (linkBau && PARTS.fromCode(linkBau[1]) && (frei || kursLink)) loadLevel(CUSTOM, linkBau[1]);
+  else if (linkTeil && (frei || kursLink)) { loadLevel(+linkTeil[1] - 1); clearHash(); }
+  else if (hash === '#zufall' && frei) loadLevel(RANDOM, newNr());
+  else if (hash === '#bauen' && frei) { loadLevel(1); openEditor(); clearHash(); }
   else loadLevel(0);
-  if (/^#[A-Za-z0-9]{4}$/.test(location.hash)) setMode(true);   // Einladungslink mit Raumcode
+  if (/^#[A-Za-z0-9]{4}$/.test(hash)) setMode(true);   // Einladungslink mit Raumcode
+  freiZeigen(null);
+  TICKET.pruefen(ticket).then(p => { frei = p && !p.abgelaufen ? p : null; freiZeigen(p); });
+  // Ticket-Link in ein schon offenes Spiel: neu laden, damit es wie beim ersten Aufruf übernommen wird
+  addEventListener('hashchange', () => { if (/^#ticket=/.test(location.hash)) location.reload(); });
 })();
 
 </script>
