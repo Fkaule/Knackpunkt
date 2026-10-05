@@ -6,6 +6,9 @@
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const MONO = '"IBM Plex Mono", Menlo, monospace';
   const fmt = (x, d = 0) => x.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+  // Auslastung in Prozent; um 100 % mit einer Nachkommastelle und zur richtigen Seite gerundet: Was hält, zeigt höchstens
+  // 100,0 %, was versagt, mindestens 100,1 %
+  const pct = u => { const x = 100 * u; return x >= 99.5 && x < 100.5 ? fmt((u <= 1 ? Math.floor : Math.ceil)(x * 10) / 10, 1) : fmt(x); };
   const clamp01 = x => Math.max(0, Math.min(1, x));
   const count = a => a.reduce((n, x) => n + (x ? 1 : 0), 0);
   const col = (tx, n) => Array.from({ length: n }, (_, ty) => [tx, ty]);
@@ -414,7 +417,7 @@
 
   function drawMax(r, scale) {
     if (r.maxTile < 0) return;
-    const [cx, cy] = center(tilePoly(r, r.maxTile, scale)), txt = `Max ${fmt(100 * r.maxUtil)} %`;
+    const [cx, cy] = center(tilePoly(r, r.maxTile, scale)), txt = `Max ${pct(r.maxUtil)} %`;
     ctx.save(); ctx.font = `600 ${Math.max(11, G.s * 0.4)}px ${MONO}`;
     const w = ctx.measureText(txt).width + 12, h = Math.max(18, G.s * 0.62);
     const lx = Math.min(Math.max(4, cx + G.s * 0.7), G.W - w - 4), ly = Math.min(Math.max(4, cy - G.s * 0.9 - h), G.H - h - 4);
@@ -511,8 +514,8 @@
   const editable = () => (st.phase === 'design' || st.phase === 'probe') && !st.busy;
 
   function statusText(r) {
-    if (r.ok) return `max. Auslastung ${fmt(100 * r.maxUtil)} %, hält.`;
-    if (r.reason === 'spannung') return `max. Auslastung ${fmt(100 * r.maxUtil)} %, versagt.`;
+    if (r.ok) return `max. Auslastung ${pct(r.maxUtil)} %, hält.`;
+    if (r.reason === 'spannung') return `max. Auslastung ${pct(r.maxUtil)} %, versagt.`;
     if (r.reason === 'lastpfad') return 'Die Last hat keine Verbindung zum Lager.';
     return 'Das Bauteil ist nicht ausreichend gelagert (Starrkörperbewegung).';
   }
@@ -726,13 +729,13 @@
   function verdict() {
     const r = st.res, L = st.L, rem = removedPct(L, r.solid, r.conn), e = st.eso[st.key];
     let h;
-    if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${fmt(100 * r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
+    if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${pct(r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
     else {
       let why = 'Das Bauteil ist nicht mehr ausreichend gelagert und rutscht weg (Starrkörperbewegung).';
       if (r.reason === 'lastpfad') why = 'Die Last hat keine Verbindung mehr zum Lager.';
       if (r.reason === 'spannung') {
         const n = count(Array.from(r.tileUtil, u => u > 1));
-        why = `${n === 1 ? 'Eine Kachel liegt' : `${n} Kacheln liegen`} über der Streckgrenze, max. Auslastung ${fmt(100 * r.maxUtil)} %.`;
+        why = `${n === 1 ? 'Eine Kachel liegt' : `${n} Kacheln liegen`} über der Streckgrenze, max. Auslastung ${pct(r.maxUtil)} %.`;
       }
       h = `<p><span class="t-bad">Versagt.</span> ${why} Gewertet: 0 %.</p>`;
     }
@@ -743,7 +746,7 @@
       let cmp = '';
       if (r.ok) cmp = rem > er + 1e-9 ? 'Algorithmus geschlagen!' : rem > er - 1e-9 ? 'Gleichstand mit dem Algorithmus.'
         : er - rem <= 5 ? 'Knapp dran.' : 'Da geht noch was.';
-      h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${fmt(100 * e.res.maxUtil)} %. ${cmp}</p>`;
+      h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${pct(e.res.maxUtil)} %. ${cmp}</p>`;
     }
     if (KURS && st.practice) h += '<p>Mit Live-Spannungen gespielt: zählt nicht für die Bestenliste. „Neuer Versuch“ ohne Häkchen zählt wieder.</p>';
     $('verdict').innerHTML = h;
@@ -809,7 +812,7 @@
       $('stamp').hidden = true; showFem(e.res, st.view.scale);
       const er = removedPct(st.L, e.solid, e.res.conn);
       $('verdict').innerHTML = `<p>Lösung der Evolutionären Strukturoptimierung: ${fmt(er, 1)} % entfernt, ${e.order.length} ganze Kacheln ` +
-        `und ${e.cuts.length} ${e.cuts.length === 1 ? 'Ecke' : 'Ecken'} zum Glätten, max. Auslastung ${fmt(100 * e.res.maxUtil)} %.</p>`;
+        `und ${e.cuts.length} ${e.cuts.length === 1 ? 'Ecke' : 'Ecken'} zum Glätten, max. Auslastung ${pct(e.res.maxUtil)} %.</p>`;
     }
     panel(); controls(); render();
   }
@@ -849,7 +852,7 @@
     lager: 'Es fehlt ein Lager: Einspannung, Festlager oder Loslager auf eine Außenkante setzen.',
     last: 'Es fehlt eine Last: Mit „Last“ auf eine Außenkante klicken.',
     kante: 'Lager und Last müssen an einer Außenkante sitzen.',
-    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Ein Loslager hält nur in einer Richtung.',
+    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Um ein einzelnes Festlager dreht es sich, ein Loslager hält nur senkrecht zur Kante.',
     bereich: 'Der Betrag läge nicht zwischen 1 und 100 kN. Last und Lager weiter auseinander setzen oder mehr Material stehen lassen.',
     voll: 'Schon das Vollteil hält diese Lasten nicht. Beträge verringern oder „Beträge automatisch“ wählen.',
   };
@@ -934,8 +937,8 @@
     }
     st.def = view; st.L = FEM.level(view); st.solid = ed.cells;
     edFe();
-    const ready = d && (ed.auto ? `${ed.loads.length > 1 ? 'Die Lasten sind' : 'Die Last ist'} so bemessen, dass das Vollteil zu ${fmt(100 * d.util)} % ausgelastet ist.`
-      : `Das Vollteil ist zu ${fmt(100 * d.util)} % ausgelastet.`);
+    const ready = d && (ed.auto ? `${ed.loads.length > 1 ? 'Die Lasten sind' : 'Die Last ist'} so bemessen, dass das Vollteil zu ${pct(d.util)} % ausgelastet ist.`
+      : `Das Vollteil ist zu ${pct(d.util)} % ausgelastet.`);
     $('verdict').innerHTML = `<p>${d ? `<span class="t-ok">Bereit.</span> ${ready} „Spielen“ startet den Entwurf.` : ED_MSG[ed.res.error]}</p>`;
     ledRender();
     layout(); panel(); controls(); render();
@@ -1602,7 +1605,7 @@
   function failWhy(r) {
     if (r.reason === 'lastpfad') return 'Die Last hat keine Verbindung mehr zum Lager.';
     if (r.reason === 'mechanismus') return 'Das Bauteil ist nicht mehr ausreichend gelagert.';
-    return `Max. Auslastung ${fmt(100 * r.maxUtil)} %.`;
+    return `Max. Auslastung ${pct(r.maxUtil)} %.`;
   }
   function joinText() {
     if (net.mode !== 'server') return 'Mitspielen: dieses Artifact öffnen, „Mehrspieler“ wählen und den Code eingeben.';
@@ -1862,7 +1865,7 @@
       const e = mp.order[mp.zoom], r = e.res;
       const w = st.busy ? ' wait' : '';   // Urteil erst nach der Animation
       set('zoomhead', `<span class="nm">${esc(e.name)}</span> <span class="${e.ok ? 't-ok' : 't-bad'}${w}">${e.ok ? 'Hält' : 'Hält nicht'}</span>` +
-        `<span class="zs">${fmt(e.rem, 1)} % entfernt.<span class="${w}"> ${e.ok ? `Max. Auslastung ${fmt(100 * r.maxUtil)} %.` : failWhy(r)}</span></span>`);
+        `<span class="zs">${fmt(e.rem, 1)} % entfernt.<span class="${w}"> ${e.ok ? `Max. Auslastung ${pct(r.maxUtil)} %.` : failWhy(r)}</span></span>`);
       set('mp-zoom', `Entwurf ${mp.zoom + 1} von ${mp.order.length}. Pfeiltasten blättern, Esc zeigt wieder alle.`);
     }
     panel();

@@ -8,6 +8,7 @@ const FEM = (() => {
   const E = 210000, NU = 0.3;   // Stahl, MPa
   const RE = 235;               // Streckgrenze S235 in MPa
   const TILE_G = TILE * TILE * THICK * 7.85e-3;   // Masse je Kachel in g
+  const PLATE = 1000;           // Steifigkeit der Lagerplatte (Kachel an Fest- und Loslager) relativ zu Stahl
 
   // Elementsteifigkeit KE (8x8) und Spannungsmatrix S (3x8) im Elementmittelpunkt.
   // Knoten gegen den Uhrzeigersinn ab unten links, je Knoten (u, v).
@@ -107,7 +108,19 @@ const FEM = (() => {
     }
   })();
 
-  // Level aufbereiten: Lager und Lasten als Knotenwerte, gesperrte Kacheln
+  // Rasterknoten einer Kachelseite, M+1 Stück der Reihe nach
+  const edge = (tx, ty, side) => {
+    const out = [];
+    for (let k = 0; k <= M; k++) {
+      if (side === 'left') out.push([tx * M, ty * M + k]);
+      if (side === 'right') out.push([tx * M + M, ty * M + k]);
+      if (side === 'bottom') out.push([tx * M + k, ty * M]);
+      if (side === 'top') out.push([tx * M + k, ty * M + M]);
+    }
+    return out;
+  };
+
+  // Level aufbereiten: Lagerkacheln, Lasten als Knotenwerte je Lastkachel, gesperrte Kacheln
   function level(def) {
     const TX = def.tx, TY = def.ty, nx = TX * M, ny = TY * M, nT = TX * TY;
     const domain = new Uint8Array(nT).fill(1);
@@ -116,37 +129,23 @@ const FEM = (() => {
     // Knotennummerierung entlang der kurzen Seite hält die Bandbreite klein
     const base = nx >= ny ? (i, j) => i * (ny + 1) + j : (i, j) => j * (nx + 1) + i;
     const nBase = (nx + 1) * (ny + 1);
-    const fix = new Uint8Array(nBase), fx = new Float64Array(nBase), fy = new Float64Array(nBase), loadNodes = new Map();
-    const edge = (tx, ty, side) => {
-      const out = [];
-      for (let k = 0; k <= M; k++) {
-        if (side === 'left') out.push([tx * M, ty * M + k]);
-        if (side === 'right') out.push([tx * M + M, ty * M + k]);
-        if (side === 'bottom') out.push([tx * M + k, ty * M]);
-        if (side === 'top') out.push([tx * M + k, ty * M + M]);
-      }
-      return out;
-    };
     for (const s of def.supports) for (const [tx, ty] of s.tiles) {
       supportTiles.push(tx + ty * TX);
       supportSides[tx + ty * TX] |= SIDEBIT[s.side];
       if (s.lock) frozen[tx + ty * TX] = 1;
-      for (const [i, j] of edge(tx, ty, s.side)) fix[base(i, j)] |= s.fix;
     }
+    // Knotenlasten [i, j, tx, ty, fx, fy]: je Lastkachel, damit sie an deren Knotenkopie angreifen (siehe nodeKey)
+    const loadList = [];
     for (const l of def.loads) {
       const n = l.tiles.length * M;   // Elementkanten, Last gleichmäßig verteilt
       for (const [tx, ty] of l.tiles) {
         frozen[tx + ty * TX] = 1;
         loadTiles.push(tx + ty * TX);
         const nodes = edge(tx, ty, l.side);
-        for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) {
-          fx[base(i, j)] += l.fx / n / 2;
-          fy[base(i, j)] += l.fy / n / 2;
-          loadNodes.set(base(i, j), [i, j, tx, ty]);   // Knoten und eine Lastkachel, zu der er gehört
-        }
+        for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) loadList.push([i, j, tx, ty, l.fx / n / 2, l.fy / n / 2]);
       }
     }
-    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, fix, fx, fy, loadNodes };
+    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, loadList };
   }
 
   // Kacheln, die über Kanten mit den Startkacheln verbunden sind. Verbunden heißt: beide Kacheln haben auf der
@@ -176,7 +175,7 @@ const FEM = (() => {
     const { TX, TY, nx, ny, nT } = L;
     // conn: hängt an einem Lager (fällt nicht ab); fe: trägt die Last, nur das wird gerechnet
     const conn = attached(L, solid);
-    const res = { ok: false, reason: '', conn, solid: Uint8Array.from(solid), area: area(solid, conn), tileUtil: new Float32Array(nT), maxUtil: 0, maxTile: -1,
+    const res = { ok: false, reason: '', conn, solid: Uint8Array.from(solid), area: area(solid, conn), tileUtil: new Float64Array(nT), maxUtil: 0, maxTile: -1,
       disp: null, dofs: 0, elements: 0, ms: 0 };
     if (!L.loadTiles.every(k => conn[k])) { res.reason = 'lastpfad'; return res; }
     const fe = connect(L, solid, L.loadTiles);
@@ -222,10 +221,21 @@ const FEM = (() => {
       (kind === 1 ? quads : tris).push({ k: tx + ty * TX, kind, pts, keys });
     }
 
+    // Lager je Knotenkopie und nur an Lagerkacheln mit Material auf der gelagerten Seite: Was die Lagerkante nur in einem
+    // Punkt berührt, ist nicht gelagert. Die Einspannung hält die ganze Kante. Fest- und Loslager sind ein Gelenk in der
+    // Mitte der Kante (Festlager in beide Richtungen, Loslager senkrecht zur Kante); ihre Kachel ist die Lagerplatte:
+    // steif, damit die Lagerkraft nicht in einem Punkt ins Bauteil geht, dreht sich um das Gelenk, ohne eigenen Nachweis.
+    const fix = new Uint8Array(L.nBase * 4), plate = new Uint8Array(nT);
+    for (const s of L.def.supports) for (const [tx, ty] of s.tiles) {
+      if (!(SIDES[sf(tx + ty * TX)] & SIDEBIT[s.side])) continue;
+      const nodes = edge(tx, ty, s.side), hinge = s.kind === 'fest' || s.kind === 'los';
+      if (hinge) plate[tx + ty * TX] = 1;
+      for (const [i, j] of hinge ? [nodes[M / 2]] : nodes) fix[nodeKey(tx, ty, i, j)] |= s.fix;
+    }
     const eq = new Int32Array(L.nBase * 8).fill(-1);
     let n = 0;
     for (let k = 0; k < L.nBase * 4; k++) if (active[k]) {
-      const f = L.fix[k >> 2];
+      const f = fix[k];
       if (!(f & 1)) eq[2 * k] = n++;
       if (!(f & 2)) eq[2 * k + 1] = n++;
     }
@@ -244,21 +254,21 @@ const FEM = (() => {
     const A = band;
     A.fill(0, 0, n * w);
     for (const el of [...quads, ...tris]) {
-      const K = el.kind === 1 ? KE : TK[el.kind], m = el.dof.length;
+      const K = el.kind === 1 ? KE : TK[el.kind], m = el.dof.length, f = plate[el.k] ? PLATE : 1;
       for (let a = 0; a < m; a++) {
         const p = el.dof[a];
         if (p < 0) continue;
         for (let b = 0; b < m; b++) {
           const q = el.dof[b];
-          if (q >= p) A[p * w + q - p] += K[a * m + b];
+          if (q >= p) A[p * w + q - p] += f * K[a * m + b];
         }
       }
     }
     const x = new Float64Array(n);
-    for (const [bi, [i, j, tx, ty]] of L.loadNodes) {
+    for (const [i, j, tx, ty, lx, ly] of L.loadList) {
       const key = nodeKey(tx, ty, i, j), p = eq[2 * key], q = eq[2 * key + 1];
-      if (p >= 0) x[p] += L.fx[bi];
-      if (q >= 0) x[q] += L.fy[bi];
+      if (p >= 0) x[p] += lx;
+      if (q >= 0) x[q] += ly;
     }
 
     // Cholesky A = U^T U (in place), dann Vorwärts- und Rückwärtseinsetzen.
@@ -304,7 +314,7 @@ const FEM = (() => {
         disp[o] = u[2 * c]; disp[o + 1] = u[2 * c + 1];
       });
     }
-    for (let k = 0; k < nT; k++) if (fe[k] && wsum[k]) {
+    for (let k = 0; k < nT; k++) if (fe[k] && wsum[k] && !plate[k]) {
       const util = sum[k] / wsum[k] / RE;
       res.tileUtil[k] = util;
       if (util > res.maxUtil) { res.maxUtil = util; res.maxTile = k; }

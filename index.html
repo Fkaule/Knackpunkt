@@ -320,6 +320,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Halbe Kacheln (abgeschnittene Ecke) bekommen entlang der Schnittkante lineare Dreieckselemente. Bei Masse und Wertung zählen sie halb.</li>
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
+            <li>Lager: Die Einspannung hält die ganze Kante. Fest- und Loslager sind Gelenke in der Mitte der Kante, wie in der Technischen Mechanik: Sie übertragen kein Moment, das Festlager hält in beide Richtungen, das Loslager nur senkrecht zur Kante. Ihre Kachel ist die Lagerplatte, steif und ohne eigenen Nachweis. Gelagert ist nur, was die Lagerkante mit einer ganzen Seite berührt, nicht nur mit einer Ecke.</li>
             <li id="rule-eso">Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
@@ -361,6 +362,7 @@ const FEM = (() => {
   const E = 210000, NU = 0.3;   // Stahl, MPa
   const RE = 235;               // Streckgrenze S235 in MPa
   const TILE_G = TILE * TILE * THICK * 7.85e-3;   // Masse je Kachel in g
+  const PLATE = 1000;           // Steifigkeit der Lagerplatte (Kachel an Fest- und Loslager) relativ zu Stahl
 
   // Elementsteifigkeit KE (8x8) und Spannungsmatrix S (3x8) im Elementmittelpunkt.
   // Knoten gegen den Uhrzeigersinn ab unten links, je Knoten (u, v).
@@ -460,7 +462,19 @@ const FEM = (() => {
     }
   })();
 
-  // Level aufbereiten: Lager und Lasten als Knotenwerte, gesperrte Kacheln
+  // Rasterknoten einer Kachelseite, M+1 Stück der Reihe nach
+  const edge = (tx, ty, side) => {
+    const out = [];
+    for (let k = 0; k <= M; k++) {
+      if (side === 'left') out.push([tx * M, ty * M + k]);
+      if (side === 'right') out.push([tx * M + M, ty * M + k]);
+      if (side === 'bottom') out.push([tx * M + k, ty * M]);
+      if (side === 'top') out.push([tx * M + k, ty * M + M]);
+    }
+    return out;
+  };
+
+  // Level aufbereiten: Lagerkacheln, Lasten als Knotenwerte je Lastkachel, gesperrte Kacheln
   function level(def) {
     const TX = def.tx, TY = def.ty, nx = TX * M, ny = TY * M, nT = TX * TY;
     const domain = new Uint8Array(nT).fill(1);
@@ -469,37 +483,23 @@ const FEM = (() => {
     // Knotennummerierung entlang der kurzen Seite hält die Bandbreite klein
     const base = nx >= ny ? (i, j) => i * (ny + 1) + j : (i, j) => j * (nx + 1) + i;
     const nBase = (nx + 1) * (ny + 1);
-    const fix = new Uint8Array(nBase), fx = new Float64Array(nBase), fy = new Float64Array(nBase), loadNodes = new Map();
-    const edge = (tx, ty, side) => {
-      const out = [];
-      for (let k = 0; k <= M; k++) {
-        if (side === 'left') out.push([tx * M, ty * M + k]);
-        if (side === 'right') out.push([tx * M + M, ty * M + k]);
-        if (side === 'bottom') out.push([tx * M + k, ty * M]);
-        if (side === 'top') out.push([tx * M + k, ty * M + M]);
-      }
-      return out;
-    };
     for (const s of def.supports) for (const [tx, ty] of s.tiles) {
       supportTiles.push(tx + ty * TX);
       supportSides[tx + ty * TX] |= SIDEBIT[s.side];
       if (s.lock) frozen[tx + ty * TX] = 1;
-      for (const [i, j] of edge(tx, ty, s.side)) fix[base(i, j)] |= s.fix;
     }
+    // Knotenlasten [i, j, tx, ty, fx, fy]: je Lastkachel, damit sie an deren Knotenkopie angreifen (siehe nodeKey)
+    const loadList = [];
     for (const l of def.loads) {
       const n = l.tiles.length * M;   // Elementkanten, Last gleichmäßig verteilt
       for (const [tx, ty] of l.tiles) {
         frozen[tx + ty * TX] = 1;
         loadTiles.push(tx + ty * TX);
         const nodes = edge(tx, ty, l.side);
-        for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) {
-          fx[base(i, j)] += l.fx / n / 2;
-          fy[base(i, j)] += l.fy / n / 2;
-          loadNodes.set(base(i, j), [i, j, tx, ty]);   // Knoten und eine Lastkachel, zu der er gehört
-        }
+        for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) loadList.push([i, j, tx, ty, l.fx / n / 2, l.fy / n / 2]);
       }
     }
-    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, fix, fx, fy, loadNodes };
+    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, loadList };
   }
 
   // Kacheln, die über Kanten mit den Startkacheln verbunden sind. Verbunden heißt: beide Kacheln haben auf der
@@ -529,7 +529,7 @@ const FEM = (() => {
     const { TX, TY, nx, ny, nT } = L;
     // conn: hängt an einem Lager (fällt nicht ab); fe: trägt die Last, nur das wird gerechnet
     const conn = attached(L, solid);
-    const res = { ok: false, reason: '', conn, solid: Uint8Array.from(solid), area: area(solid, conn), tileUtil: new Float32Array(nT), maxUtil: 0, maxTile: -1,
+    const res = { ok: false, reason: '', conn, solid: Uint8Array.from(solid), area: area(solid, conn), tileUtil: new Float64Array(nT), maxUtil: 0, maxTile: -1,
       disp: null, dofs: 0, elements: 0, ms: 0 };
     if (!L.loadTiles.every(k => conn[k])) { res.reason = 'lastpfad'; return res; }
     const fe = connect(L, solid, L.loadTiles);
@@ -575,10 +575,21 @@ const FEM = (() => {
       (kind === 1 ? quads : tris).push({ k: tx + ty * TX, kind, pts, keys });
     }
 
+    // Lager je Knotenkopie und nur an Lagerkacheln mit Material auf der gelagerten Seite: Was die Lagerkante nur in einem
+    // Punkt berührt, ist nicht gelagert. Die Einspannung hält die ganze Kante. Fest- und Loslager sind ein Gelenk in der
+    // Mitte der Kante (Festlager in beide Richtungen, Loslager senkrecht zur Kante); ihre Kachel ist die Lagerplatte:
+    // steif, damit die Lagerkraft nicht in einem Punkt ins Bauteil geht, dreht sich um das Gelenk, ohne eigenen Nachweis.
+    const fix = new Uint8Array(L.nBase * 4), plate = new Uint8Array(nT);
+    for (const s of L.def.supports) for (const [tx, ty] of s.tiles) {
+      if (!(SIDES[sf(tx + ty * TX)] & SIDEBIT[s.side])) continue;
+      const nodes = edge(tx, ty, s.side), hinge = s.kind === 'fest' || s.kind === 'los';
+      if (hinge) plate[tx + ty * TX] = 1;
+      for (const [i, j] of hinge ? [nodes[M / 2]] : nodes) fix[nodeKey(tx, ty, i, j)] |= s.fix;
+    }
     const eq = new Int32Array(L.nBase * 8).fill(-1);
     let n = 0;
     for (let k = 0; k < L.nBase * 4; k++) if (active[k]) {
-      const f = L.fix[k >> 2];
+      const f = fix[k];
       if (!(f & 1)) eq[2 * k] = n++;
       if (!(f & 2)) eq[2 * k + 1] = n++;
     }
@@ -597,21 +608,21 @@ const FEM = (() => {
     const A = band;
     A.fill(0, 0, n * w);
     for (const el of [...quads, ...tris]) {
-      const K = el.kind === 1 ? KE : TK[el.kind], m = el.dof.length;
+      const K = el.kind === 1 ? KE : TK[el.kind], m = el.dof.length, f = plate[el.k] ? PLATE : 1;
       for (let a = 0; a < m; a++) {
         const p = el.dof[a];
         if (p < 0) continue;
         for (let b = 0; b < m; b++) {
           const q = el.dof[b];
-          if (q >= p) A[p * w + q - p] += K[a * m + b];
+          if (q >= p) A[p * w + q - p] += f * K[a * m + b];
         }
       }
     }
     const x = new Float64Array(n);
-    for (const [bi, [i, j, tx, ty]] of L.loadNodes) {
+    for (const [i, j, tx, ty, lx, ly] of L.loadList) {
       const key = nodeKey(tx, ty, i, j), p = eq[2 * key], q = eq[2 * key + 1];
-      if (p >= 0) x[p] += L.fx[bi];
-      if (q >= 0) x[q] += L.fy[bi];
+      if (p >= 0) x[p] += lx;
+      if (q >= 0) x[q] += ly;
     }
 
     // Cholesky A = U^T U (in place), dann Vorwärts- und Rückwärtseinsetzen.
@@ -657,7 +668,7 @@ const FEM = (() => {
         disp[o] = u[2 * c]; disp[o + 1] = u[2 * c + 1];
       });
     }
-    for (let k = 0; k < nT; k++) if (fe[k] && wsum[k]) {
+    for (let k = 0; k < nT; k++) if (fe[k] && wsum[k] && !plate[k]) {
       const util = sum[k] / wsum[k] / RE;
       res.tileUtil[k] = util;
       if (util > res.maxUtil) { res.maxUtil = util; res.maxTile = k; }
@@ -854,7 +865,10 @@ const PARTS = (FEM => {
       : [pin('fest', [wl >> 1, 0], 'bottom'), pin(R.chance(0.5) ? 'fest' : 'los', [tx - 1 - (wl >> 1), 0], 'bottom')];
     let ld;
     if (mode === 'wind') ld = load(line(2, i => [fromLeft ? 0 : tx - 1, ty - 1 - i]), fromLeft ? 'left' : 'right', fromLeft ? 0 : 180);
-    else if (mode === 'riegel') { const n = R.int(1, 2); ld = load(line(n, i => [R.int(wl, tx - wl - n) + i, ty - 1]), 'top', -90); }
+    else if (mode === 'riegel') {   // nebeneinander liegende Lastkacheln; je Kachel ein Zufallszug, damit die übrigen Nummern bleiben
+      const n = R.int(1, 2), xs = line(n, () => R.int(wl, tx - wl - n));
+      ld = load(line(n, i => [xs[0] + i, ty - 1]), 'top', -90);
+    }
     else ld = load([[fromLeft ? 0 : tx - 1, ty - 1]], 'top', fromLeft ? -45 : -135);
     return { name: 'Rahmen', g, supports, loads: [ld],
       note: `Zwei Stützen, ${clamped ? 'unten eingespannt' : 'auf Lagern'}, ${mode === 'wind' ? 'Wind von der Seite'
@@ -1091,6 +1105,9 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const MONO = '"IBM Plex Mono", Menlo, monospace';
   const fmt = (x, d = 0) => x.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+  // Auslastung in Prozent; um 100 % mit einer Nachkommastelle und zur richtigen Seite gerundet: Was hält, zeigt höchstens
+  // 100,0 %, was versagt, mindestens 100,1 %
+  const pct = u => { const x = 100 * u; return x >= 99.5 && x < 100.5 ? fmt((u <= 1 ? Math.floor : Math.ceil)(x * 10) / 10, 1) : fmt(x); };
   const clamp01 = x => Math.max(0, Math.min(1, x));
   const count = a => a.reduce((n, x) => n + (x ? 1 : 0), 0);
   const col = (tx, n) => Array.from({ length: n }, (_, ty) => [tx, ty]);
@@ -1499,7 +1516,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
 
   function drawMax(r, scale) {
     if (r.maxTile < 0) return;
-    const [cx, cy] = center(tilePoly(r, r.maxTile, scale)), txt = `Max ${fmt(100 * r.maxUtil)} %`;
+    const [cx, cy] = center(tilePoly(r, r.maxTile, scale)), txt = `Max ${pct(r.maxUtil)} %`;
     ctx.save(); ctx.font = `600 ${Math.max(11, G.s * 0.4)}px ${MONO}`;
     const w = ctx.measureText(txt).width + 12, h = Math.max(18, G.s * 0.62);
     const lx = Math.min(Math.max(4, cx + G.s * 0.7), G.W - w - 4), ly = Math.min(Math.max(4, cy - G.s * 0.9 - h), G.H - h - 4);
@@ -1596,8 +1613,8 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   const editable = () => (st.phase === 'design' || st.phase === 'probe') && !st.busy;
 
   function statusText(r) {
-    if (r.ok) return `max. Auslastung ${fmt(100 * r.maxUtil)} %, hält.`;
-    if (r.reason === 'spannung') return `max. Auslastung ${fmt(100 * r.maxUtil)} %, versagt.`;
+    if (r.ok) return `max. Auslastung ${pct(r.maxUtil)} %, hält.`;
+    if (r.reason === 'spannung') return `max. Auslastung ${pct(r.maxUtil)} %, versagt.`;
     if (r.reason === 'lastpfad') return 'Die Last hat keine Verbindung zum Lager.';
     return 'Das Bauteil ist nicht ausreichend gelagert (Starrkörperbewegung).';
   }
@@ -1811,13 +1828,13 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   function verdict() {
     const r = st.res, L = st.L, rem = removedPct(L, r.solid, r.conn), e = st.eso[st.key];
     let h;
-    if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${fmt(100 * r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
+    if (r.ok) h = `<p><span class="t-ok">Hält.</span> Max. Auslastung ${pct(r.maxUtil)} %. Sie haben ${fmt(rem, 1)} % Material entfernt.</p>`;
     else {
       let why = 'Das Bauteil ist nicht mehr ausreichend gelagert und rutscht weg (Starrkörperbewegung).';
       if (r.reason === 'lastpfad') why = 'Die Last hat keine Verbindung mehr zum Lager.';
       if (r.reason === 'spannung') {
         const n = count(Array.from(r.tileUtil, u => u > 1));
-        why = `${n === 1 ? 'Eine Kachel liegt' : `${n} Kacheln liegen`} über der Streckgrenze, max. Auslastung ${fmt(100 * r.maxUtil)} %.`;
+        why = `${n === 1 ? 'Eine Kachel liegt' : `${n} Kacheln liegen`} über der Streckgrenze, max. Auslastung ${pct(r.maxUtil)} %.`;
       }
       h = `<p><span class="t-bad">Versagt.</span> ${why} Gewertet: 0 %.</p>`;
     }
@@ -1828,7 +1845,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
       let cmp = '';
       if (r.ok) cmp = rem > er + 1e-9 ? 'Algorithmus geschlagen!' : rem > er - 1e-9 ? 'Gleichstand mit dem Algorithmus.'
         : er - rem <= 5 ? 'Knapp dran.' : 'Da geht noch was.';
-      h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${fmt(100 * e.res.maxUtil)} %. ${cmp}</p>`;
+      h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${pct(e.res.maxUtil)} %. ${cmp}</p>`;
     }
     if (KURS && st.practice) h += '<p>Mit Live-Spannungen gespielt: zählt nicht für die Bestenliste. „Neuer Versuch“ ohne Häkchen zählt wieder.</p>';
     $('verdict').innerHTML = h;
@@ -1894,7 +1911,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
       $('stamp').hidden = true; showFem(e.res, st.view.scale);
       const er = removedPct(st.L, e.solid, e.res.conn);
       $('verdict').innerHTML = `<p>Lösung der Evolutionären Strukturoptimierung: ${fmt(er, 1)} % entfernt, ${e.order.length} ganze Kacheln ` +
-        `und ${e.cuts.length} ${e.cuts.length === 1 ? 'Ecke' : 'Ecken'} zum Glätten, max. Auslastung ${fmt(100 * e.res.maxUtil)} %.</p>`;
+        `und ${e.cuts.length} ${e.cuts.length === 1 ? 'Ecke' : 'Ecken'} zum Glätten, max. Auslastung ${pct(e.res.maxUtil)} %.</p>`;
     }
     panel(); controls(); render();
   }
@@ -1934,7 +1951,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     lager: 'Es fehlt ein Lager: Einspannung, Festlager oder Loslager auf eine Außenkante setzen.',
     last: 'Es fehlt eine Last: Mit „Last“ auf eine Außenkante klicken.',
     kante: 'Lager und Last müssen an einer Außenkante sitzen.',
-    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Ein Loslager hält nur in einer Richtung.',
+    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Um ein einzelnes Festlager dreht es sich, ein Loslager hält nur senkrecht zur Kante.',
     bereich: 'Der Betrag läge nicht zwischen 1 und 100 kN. Last und Lager weiter auseinander setzen oder mehr Material stehen lassen.',
     voll: 'Schon das Vollteil hält diese Lasten nicht. Beträge verringern oder „Beträge automatisch“ wählen.',
   };
@@ -2019,8 +2036,8 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     }
     st.def = view; st.L = FEM.level(view); st.solid = ed.cells;
     edFe();
-    const ready = d && (ed.auto ? `${ed.loads.length > 1 ? 'Die Lasten sind' : 'Die Last ist'} so bemessen, dass das Vollteil zu ${fmt(100 * d.util)} % ausgelastet ist.`
-      : `Das Vollteil ist zu ${fmt(100 * d.util)} % ausgelastet.`);
+    const ready = d && (ed.auto ? `${ed.loads.length > 1 ? 'Die Lasten sind' : 'Die Last ist'} so bemessen, dass das Vollteil zu ${pct(d.util)} % ausgelastet ist.`
+      : `Das Vollteil ist zu ${pct(d.util)} % ausgelastet.`);
     $('verdict').innerHTML = `<p>${d ? `<span class="t-ok">Bereit.</span> ${ready} „Spielen“ startet den Entwurf.` : ED_MSG[ed.res.error]}</p>`;
     ledRender();
     layout(); panel(); controls(); render();
@@ -2687,7 +2704,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   function failWhy(r) {
     if (r.reason === 'lastpfad') return 'Die Last hat keine Verbindung mehr zum Lager.';
     if (r.reason === 'mechanismus') return 'Das Bauteil ist nicht mehr ausreichend gelagert.';
-    return `Max. Auslastung ${fmt(100 * r.maxUtil)} %.`;
+    return `Max. Auslastung ${pct(r.maxUtil)} %.`;
   }
   function joinText() {
     if (net.mode !== 'server') return 'Mitspielen: dieses Artifact öffnen, „Mehrspieler“ wählen und den Code eingeben.';
@@ -2947,7 +2964,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
       const e = mp.order[mp.zoom], r = e.res;
       const w = st.busy ? ' wait' : '';   // Urteil erst nach der Animation
       set('zoomhead', `<span class="nm">${esc(e.name)}</span> <span class="${e.ok ? 't-ok' : 't-bad'}${w}">${e.ok ? 'Hält' : 'Hält nicht'}</span>` +
-        `<span class="zs">${fmt(e.rem, 1)} % entfernt.<span class="${w}"> ${e.ok ? `Max. Auslastung ${fmt(100 * r.maxUtil)} %.` : failWhy(r)}</span></span>`);
+        `<span class="zs">${fmt(e.rem, 1)} % entfernt.<span class="${w}"> ${e.ok ? `Max. Auslastung ${pct(r.maxUtil)} %.` : failWhy(r)}</span></span>`);
       set('mp-zoom', `Entwurf ${mp.zoom + 1} von ${mp.order.length}. Pfeiltasten blättern, Esc zeigt wieder alle.`);
     }
     panel();

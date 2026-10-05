@@ -125,12 +125,15 @@ Lineare Dreiecke können keine Biegung im Element abbilden und sind deshalb stei
 
 **Aufbau und Randbedingungen.** $`\mathbf K = \sum_e \mathbf K_e`$ nach üblicher Assemblierung, dann $`\mathbf K\,\mathbf u = \mathbf f`$.
 
-- Lager sperren Freiheitsgrade an allen fünf Knoten einer Kachelkante: Einspannung und Festlager $`u = v = 0`$, Loslager nur $`v = 0`$. Gesperrte Freiheitsgrade werden aus dem System gestrichen.
-- Die Last $`F`$ wirkt als gleichmäßige Linienlast auf der Kante der Lastkachel, nicht als Punktlast, damit am Lastangriff keine Singularität entsteht. Bei $`n`$ belasteten Elementkanten bekommt jede Kante $`F/n`$, je zur Hälfte an ihre beiden Endknoten (konsistente Knotenkräfte für lineare Ansätze).
+- Die Einspannung sperrt $`u = v = 0`$ an allen fünf Knoten einer Kachelkante.
+- Fest- und Loslager sind Gelenke wie in der Technischen Mechanik: Gesperrt wird nur der Mittelknoten der Kachelkante, beim Festlager $`u = v = 0`$, beim Loslager nur die Verschiebung senkrecht zur Kante. Damit übertragen sie kein Moment; ein Bauteil auf einem einzigen Festlager dreht sich um das Gelenk. Ihre Kachel ist die Lagerplatte: Ihre Elemente sind 1000-mal steifer als Stahl, damit die Lagerkraft nicht in einem Punkt ins Bauteil geht (die Spannung unter einer Punktlast wäre singulär). Die Platte dreht sich frei um das Gelenk und wird nicht nachgewiesen; zwischen Faktor 100 und 1000 ändern sich die Auslastungen um weniger als 0,1 Prozentpunkte.
+- Gesperrt wird an den Knoten der Lagerkachel selbst (an Kachelecken ihre Knotenkopie) und nur, wenn sie auf der gelagerten Seite Material hat. Was die Lagerkante nur mit einer Ecke oder einer Dreiecksspitze berührt, ist nicht gelagert.
+- Gesperrte Freiheitsgrade werden aus dem System gestrichen.
+- Die Last $`F`$ wirkt als gleichmäßige Linienlast auf der Kante der Lastkachel, nicht als Punktlast, damit am Lastangriff keine Singularität entsteht. Bei $`n`$ belasteten Elementkanten bekommt jede Kante $`F/n`$, je zur Hälfte an ihre beiden Endknoten (konsistente Knotenkräfte für lineare Ansätze), und zwar an die Knotenkopie der Lastkachel; zwei Lasten, die sich an einer Ecke treffen, bleiben so getrennt.
 
 **Lösen.** $`\mathbf K`$ ist symmetrisch und positiv definit, solange die Lager jede Starrkörperbewegung verhindern. Die Knoten sind entlang der kurzen Bauteilseite nummeriert. Dadurch ist $`\mathbf K`$ eine Bandmatrix mit der halben Bandbreite $`b \approx 2\,(n_y + 2)`$, wobei $`n_y`$ die Zahl der Elemente über die kurze Seite ist. Gelöst wird mit Cholesky $`\mathbf K = \mathbf U^T \mathbf U`$ im Bandspeicher (Aufwand $`\sim n\,b^2`$) und Vorwärts- und Rückwärtseinsetzen. Beim vollen Kragarm sind das 2048 Elemente und 4224 Freiheitsgrade, gelöst in etwa 15 ms.
 
-**Starrkörperbewegung.** Wird bei der Zerlegung ein Pivot kleiner als $`10^{-7}\,K_{e,11}`$, ist $`\mathbf K`$ singulär: Das Restbauteil kann sich bewegen, etwa eine Brücke, die nur noch auf dem Loslager steht. Das zählt als Versagen (Mechanismus).
+**Starrkörperbewegung.** Wird bei der Zerlegung ein Pivot kleiner als $`10^{-7}\,K_{e,11}`$, ist $`\mathbf K`$ singulär: Das Restbauteil kann sich bewegen, etwa eine Brücke, die nur noch auf dem Loslager oder nur noch auf dem Festlager steht. Das zählt als Versagen (Mechanismus).
 
 ### 5. Nachweis
 
@@ -149,7 +152,7 @@ A_k = \frac{\sum_{e \in k} w_e\,\sigma_{v,e}}{R_e \sum_{e \in k} w_e}
 
 Eine halbe Kachel mittelt über die halbe Fläche und ist damit etwas strenger als eine ganze.
 
-Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager hat und keine Starrkörperbewegung möglich ist.
+Die Lagerplatten unter Fest- und Loslager werden nicht nachgewiesen (siehe Abschnitt 4). Der Entwurf hält, wenn $`\max_k A_k \le 1`$ gilt, die Last einen Weg zum Lager hat und keine Starrkörperbewegung möglich ist. Angezeigt wird die Auslastung in ganzen Prozent, zwischen 99,5 und 100,5 % mit einer Nachkommastelle und zur richtigen Seite gerundet: Was hält, zeigt höchstens 100,0 %, was versagt, mindestens 100,1 %.
 
 **Warum gemittelt wird.** Jede entfernte Kachel erzeugt einspringende 90°-Ecken. In der linearen Elastizitätstheorie ist die Spannung dort singulär ($`\sigma \sim r^{-\text{0,46}}`$), der Spitzenwert hängt also nur vom Netz ab. Der Mittelwert über eine Kachel ist dagegen eine stabile Größe und entspricht grob einer Spannungsmittelung nach Neuber. Für duktilen Stahl ist das vertretbar: Örtliche Spitzen dürfen fließen, entscheidend ist, ob der Querschnitt trägt.
 
@@ -180,10 +183,10 @@ Die Lasten sind so gewählt, dass das Vollteil zu gut 50 % ausgelastet ist:
 | Bauteil | Lager | Last (Linienlast) | Auslastung Vollteil | ESO entfernt (ganze Kacheln, mit Glättung) |
 |---|---|---|---|---|
 | Kragarm 160 × 80 mm | linke Kante eingespannt | 10 kN nach unten auf 20 mm der rechten Kante, mittig | 55,9 % | 58,6 %, 64,5 % |
-| Brücke 200 × 60 mm | Festlager links, Loslager rechts, je 10 mm | 20 kN nach unten auf 20 mm der Oberkante, mittig | 50,6 % | 60,0 %, 64,2 % |
+| Brücke 200 × 60 mm | Festlager links, Loslager rechts, Gelenke auf 10-mm-Lagerplatten | 20 kN nach unten auf 20 mm der Oberkante, mittig | 53,0 % | 57,5 %, 60,8 % |
 | L-Winkel 120 × 120 mm, Schenkel 50 mm breit | obere Kante des senkrechten Schenkels eingespannt | 6 kN nach unten auf 10 mm am Ende des waagrechten Schenkels | 57,3 % | 53,7 %, 55,3 % |
 
-Gesperrt und nicht entfernbar sind die Lastkacheln und die Kacheln unter Fest- und Loslager.
+Gesperrt und nicht entfernbar sind die Lastkacheln und die Lagerplatten unter Fest- und Loslager. Bis 0.12.1 übertrugen Fest- und Loslager über die ganze Kachelkante ein Moment; mit Gelenken hält das Vollteil der Brücke etwas weniger (vorher 50,6 %) und ESO entfernt weniger (vorher 60,0 % und 64,2 %).
 
 Zufallsbauteile und eigene Bauteile werden genauso bemessen, nur automatisch: Das Vollteil wird mit 1 kN gerechnet. Weil das Modell linear ist, wächst die Auslastung proportional zur Last. Gewählt wird aus 1; 1,2; 1,5; 2; 2,5; 3; 4; 5; 6; 8; 10; 12; 15; 20; 25; 30; 40; 50; 60; 80; 100 kN der Wert, bei dem das Vollteil am nächsten an 55 % ausgelastet ist (in `src/parts.js`, Funktion `scale`). Lastrichtungen gibt es in Schritten von 45°.
 
@@ -202,7 +205,7 @@ sowie die Biegespannung im Elementmittelpunkt der obersten Elementreihe nahe der
 | 10 mm | 4 | 62,412 mm | 62,463 mm | -0,08 % | 714,35 MPa | 714,38 MPa | 0,00 % |
 | 20 mm | 8 | 7,815 mm | 7,826 mm | -0,13 % | 208,36 MPa | 208,36 MPa | 0,00 % |
 
-Weitere Tests: Eine Brücke nur auf dem Loslager wird als Mechanismus erkannt, nur auf dem Festlager nicht. ESO entfernt beim Kragarm 75 von 128 Kacheln, mit Glättung 64,5 %. Die Dreieckselemente bestehen den Patchtest (Starrkörperbewegung ohne Kräfte, konstante Dehnung exakt). Ein schräger Steg aus Dreiecken trägt, eine Diagonale aus Kacheln, die sich nur an den Ecken berühren, nicht. Volle Kacheln rechnen bitgleich wie vor der Einführung der halben Kacheln (geprüft an 320 Zufallsentwürfen).
+Weitere Tests: Eine Brücke nur auf dem Loslager oder nur auf dem Festlager ist ein Mechanismus, auf beiden trägt sie. Was die Lagerkante nur mit einer Ecke berührt, ist nicht gelagert (L-Winkel mit zwei halben Kacheln an der Decke bricht mit 108 %, Träger Nr. 37 auf nur einer Dreiecksspitze ist ein Mechanismus). Zwei Lasten, die sich an einer Ecke treffen, überlagern sich exakt. Die Lastkacheln der Zufallsbauteile liegen nebeneinander. ESO entfernt beim Kragarm 75 von 128 Kacheln, mit Glättung 64,5 %. Die Dreieckselemente bestehen den Patchtest (Starrkörperbewegung ohne Kräfte, konstante Dehnung exakt). Ein schräger Steg aus Dreiecken trägt, eine Diagonale aus Kacheln, die sich nur an den Ecken berühren, nicht. Volle Kacheln rechnen bitgleich wie vor der Einführung der halben Kacheln (geprüft an 320 Zufallsentwürfen).
 
 Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Netz (PLANE182, Enhanced Strain, ebener Spannungszustand, Dicke 10 mm), verglichen über die Vergleichsspannung im Elementmittelpunkt.
 
@@ -212,9 +215,9 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 |---|---|
 | Werkstoff, Element, Kondensation, Spannungsmatrix $`\mathbf D\,\mathbf B(0,0)`$ | Block `KE, S` am Anfang |
 | Halbe Kacheln: Zustände, Rasterquadrate, Dreieckselemente | `SIDES`, `CORNERS`, `squareKind()`, Block `TK, TS` |
-| Lager und Lasten als Knotenwerte, gesperrte Kacheln | `level()` |
+| Lagerkacheln, Lasten als Knotenwerte je Lastkachel, gesperrte Kacheln | `level()` |
 | Zusammenhang über Kanten | `connect()` |
-| Eckkontakt, Nummerierung, Assemblierung, Cholesky, Spannungen, Auslastung | `analyze()` |
+| Eckkontakt, Lager je Knotenkopie, Lagerplatten, Nummerierung, Assemblierung, Cholesky, Spannungen, Auslastung | `analyze()` |
 | Gegner | `eso()` |
 
 ### Literatur

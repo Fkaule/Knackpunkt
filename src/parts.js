@@ -139,7 +139,10 @@ const PARTS = (FEM => {
       : [pin('fest', [wl >> 1, 0], 'bottom'), pin(R.chance(0.5) ? 'fest' : 'los', [tx - 1 - (wl >> 1), 0], 'bottom')];
     let ld;
     if (mode === 'wind') ld = load(line(2, i => [fromLeft ? 0 : tx - 1, ty - 1 - i]), fromLeft ? 'left' : 'right', fromLeft ? 0 : 180);
-    else if (mode === 'riegel') { const n = R.int(1, 2); ld = load(line(n, i => [R.int(wl, tx - wl - n) + i, ty - 1]), 'top', -90); }
+    else if (mode === 'riegel') {   // nebeneinander liegende Lastkacheln; je Kachel ein Zufallszug, damit die übrigen Nummern bleiben
+      const n = R.int(1, 2), xs = line(n, () => R.int(wl, tx - wl - n));
+      ld = load(line(n, i => [xs[0] + i, ty - 1]), 'top', -90);
+    }
     else ld = load([[fromLeft ? 0 : tx - 1, ty - 1]], 'top', fromLeft ? -45 : -135);
     return { name: 'Rahmen', g, supports, loads: [ld],
       note: `Zwei Stützen, ${clamped ? 'unten eingespannt' : 'auf Lagern'}, ${mode === 'wind' ? 'Wind von der Seite'

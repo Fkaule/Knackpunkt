@@ -22,7 +22,20 @@ test("Zufallsbauteile: Vollteil hält, zu 45 bis 65 % ausgelastet, Lager und Las
       const [dx, dy] = out[g.side], has = (a, b) => a >= 0 && b >= 0 && a < L.TX && b < L.TY && L.domain[a + b * L.TX];
       assert.ok(has(x, y) && !has(x + dx, y + dy), `Nr. ${nr}: Kachel ${x},${y} liegt nicht an einer freien Kante`);
     }
+    for (const l of d.loads) l.tiles.slice(1).forEach(([x, y], i) => {
+      const [px, py] = l.tiles[i];
+      assert.strictEqual(Math.abs(x - px) + Math.abs(y - py), 1, `Nr. ${nr}: Lastkacheln liegen nicht nebeneinander`);
+    });
   }
+});
+
+test("Zufallsbauteile: Rahmen mit Riegellast hat nebeneinander liegende Lastkacheln; Träger auf einer Dreiecksspitze ist beweglich", () => {
+  const d = PARTS.generate(1597);   // bis 0.12.1 lagen die beiden Lastkacheln hier sechs Kacheln auseinander
+  assert.strictEqual(d.name, "Rahmen");
+  assert.deepStrictEqual(d.loads[0].tiles.map(([x]) => x - d.loads[0].tiles[0][0]), [0, 1]);
+  const t = PARTS.generate(37), L = FEM.level(t), s = L.domain.slice(), k = (x, y) => x + y * L.TX;
+  s[k(16, 0)] = 5; s[k(15, 1)] = 0; s[k(14, 0)] = 0;   // nur noch die Spitze einer halben Kachel am Festlager
+  assert.strictEqual(FEM.analyze(L, s).reason, "mechanismus");
 });
 
 test("Baukasten: Code hin und zurück, mehrere Lasten mit Richtung und Betrag, alte Links weiter gültig", () => {
@@ -54,6 +67,8 @@ test("Baukasten: verständliche Gründe, wenn etwas fehlt", () => {
   assert.strictEqual(PARTS.build({ ...base, supports: [] }).error, "lager");
   assert.strictEqual(PARTS.build({ ...base, loads: [] }).error, "last");
   assert.strictEqual(PARTS.build({ ...base, supports: [{ kind: "los", side: "bottom", tiles: [[0, 0]] }] }).error, "beweglich");
+  assert.strictEqual(PARTS.build({ ...base, supports: [{ kind: "fest", side: "bottom", tiles: [[0, 0]] }] }).error, "beweglich");   // dreht sich ums Gelenk
+  assert.ok(PARTS.build({ ...base, supports: [{ kind: "fest", side: "bottom", tiles: [[0, 0]] }, { kind: "los", side: "bottom", tiles: [[3, 0]] }] }).def);
   assert.strictEqual(PARTS.build({ ...base, loads: [{ side: "left", tiles: [[1, 1]], deg: -90, kn: 1 }] }).error, "kante");
   assert.strictEqual(PARTS.build({ ...base, loads: [{ side: "right", tiles: [[3, 1]], deg: -90, kn: 100 }], auto: false }).error, "voll");
 });
