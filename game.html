@@ -1720,6 +1720,10 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     st.li = i; st.def = def; st.key = def.nr ? 'z' + def.nr : def.code ? 'b' + def.code : i; st.L = FEM.level(def);
     if (duel && duel.key !== partKey()) duel = null;   // anderes Bauteil beendet die Herausforderung
     st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.busy = false; st.practice = $('live').checked;
+    if (KURS) {   // im Kurs beginnt jeder Lauf mit dem Entwurf des vorigen (auch nach Neuladen)
+      const alt = decode(store.get('kurs-' + partKey()), st.L);
+      if (alt) st.solid = alt;
+    }
     st.drag = null; st.paint = null; st.hover = -1;
     $('stamp').hidden = true;
     document.querySelectorAll('#levels button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
@@ -1851,6 +1855,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
         : er - rem <= 5 ? 'Knapp dran.' : 'Da geht noch was.';
       h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${pct(e.res.maxUtil)} %. ${cmp}</p>`;
     }
+    if (KURS) store.set('kurs-' + partKey(), encode(r.solid));   // Ausgang für den nächsten Lauf
     if (KURS && st.practice) h += '<p>Mit Live-Spannungen gespielt: zählt nicht für die Bestenliste. „Neuer Versuch“ ohne Häkchen zählt wieder.</p>';
     if (KURS_VERSUCHE != null) h += kursRest > 0 ? `<p>Noch ${kursRest} von ${KURS_MAX} Versuchen.</p>`
       : '<p><b>Das war Ihr letzter Versuch.</b> Es zählt Ihr bestes gehaltenes Ergebnis in der Bestenliste.</p>';
@@ -3230,7 +3235,8 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   $('b-retry').onclick = () => {
     if (st.busy || (KURS_VERSUCHE != null && kursRest <= 0)) return;
     versuchLaeuft = false;
-    st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.practice = $('live').checked;
+    st.animId++; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.practice = $('live').checked;
+    if (!KURS) { st.solid = st.L.domain.slice(); st.undo = []; }   // im Kurs bleibt der Entwurf des Laufs als Ausgang, Rückgängig inklusive
     $('stamp').hidden = true; refresh();
   };
   $('b-eso').onclick = toggleEso;
