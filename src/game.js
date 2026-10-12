@@ -64,6 +64,14 @@
   const KURS = new URLSearchParams(location.search).has('kurs');
   const KURS_PROBEN = 3;   // Probe-Rechnungen je Versuch im Kurs (sonst eine); ohne Lösung des Algorithmus
   const KURS_NAME = (new URLSearchParams(location.search).get('kurs') || '').replace(/[<>&"]/g, '').slice(0, 40);   // ?kurs=Lenker
+  // Versuche im Kurs (?versuche=übrige von KURS_MAX): Ein Versuch beginnt mit der ersten Änderung am Bauteil und wird der
+  // Kursseite gemeldet (knackpunkt-versuch); nach dem letzten gibt es keinen neuen. Ohne Parameter wie bisher unbegrenzt.
+  const KURS_MAX = 5;
+  const KURS_VERSUCHE = KURS && new URLSearchParams(location.search).has('versuche')
+    ? Math.max(0, Math.min(KURS_MAX, parseInt(new URLSearchParams(location.search).get('versuche'), 10) || 0)) : null;
+  let kursRest = KURS_VERSUCHE, versuchLaeuft = false;
+  const versuchText = () => KURS_VERSUCHE == null ? ''
+    : `<p>Versuch ${KURS_MAX - kursRest + (versuchLaeuft ? 0 : 1)} von ${KURS_MAX}${versuchLaeuft ? '' : ', er beginnt mit der ersten Änderung'}.</p>`;
   // Freischaltung (src/ticket.js): Das ganze Spiel gibt es mit einem Ticket aus dem FEM-Kurs (Link mit #ticket=…).
   // Ohne Ticket bleiben der Kursmodus mit dem verlinkten Bauteil, Herausforderungen (nur dieses Bauteil) und das
   // Beitreten zu einem Wettkampf; einen Wettkampf eröffnen nur mit Ticket.
@@ -549,6 +557,7 @@
     const design = st.phase === 'design' || st.phase === 'probe', edit = st.phase === 'edit';
     $('act-design').hidden = !design;
     $('act-result').hidden = design || edit;
+    $('b-retry').hidden = KURS_VERSUCHE != null && kursRest <= 0;   // im Kurs alle Versuche gespielt
     $('act-edit').hidden = !edit;
     $('etools').hidden = !edit;
     if (!mp.on) $('tools').hidden = edit;
@@ -586,7 +595,7 @@
   function refresh() {
     st.conn = FEM.attached(st.L, st.solid);
     const loose = st.solid.some((x, k) => x && !st.conn[k]);
-    const hint = loose ? '<p>Rot gestrichelte Kacheln haben keine Verbindung zum Lager und fallen beim Abgeben ab.</p>' : '';
+    const hint = (loose ? '<p>Rot gestrichelte Kacheln haben keine Verbindung zum Lager und fallen beim Abgeben ab.</p>' : '') + versuchText();
     if (st.open && st.phase === 'design') {
       const r = FEM.analyze(st.L, st.solid);
       if (!r.ok) return openFail();
@@ -749,6 +758,8 @@
       h += `<p>Algorithmus (ESO): ${fmt(er, 1)} % entfernt, max. Auslastung ${pct(e.res.maxUtil)} %. ${cmp}</p>`;
     }
     if (KURS && st.practice) h += '<p>Mit Live-Spannungen gespielt: zählt nicht für die Bestenliste. „Neuer Versuch“ ohne Häkchen zählt wieder.</p>';
+    if (KURS_VERSUCHE != null) h += kursRest > 0 ? `<p>Noch ${kursRest} von ${KURS_MAX} Versuchen.</p>`
+      : '<p><b>Das war Ihr letzter Versuch.</b> Es zählt Ihr bestes gehaltenes Ergebnis in der Bestenliste.</p>';
     $('verdict').innerHTML = h;
     duelRender();
     kursMelden();
@@ -1990,7 +2001,13 @@
     if (s > 1) return inside ? 0 : st.open ? s : 1;
     return st.open ? 0 : ((c + 2) % 4) + 2;
   }
-  const pushUndo = () => { st.undo.push(st.solid.slice()); if (st.undo.length > 200) st.undo.shift(); };
+  const pushUndo = () => {
+    st.undo.push(st.solid.slice()); if (st.undo.length > 200) st.undo.shift();
+    if (KURS_VERSUCHE != null && !versuchLaeuft && kursRest > 0) {   // erste Änderung: Versuch beginnt
+      versuchLaeuft = true; kursRest--;
+      parent.postMessage({ typ: 'knackpunkt-versuch', teil: partKey() }, '*');
+    }
+  };
 
   cv.addEventListener('pointerdown', e => {
     if (!editable()) return;
@@ -2117,7 +2134,8 @@
   }
   $('b-reset').onclick = resetAll;
   $('b-retry').onclick = () => {
-    if (st.busy) return;
+    if (st.busy || (KURS_VERSUCHE != null && kursRest <= 0)) return;
+    versuchLaeuft = false;
     st.animId++; st.solid = st.L.domain.slice(); st.undo = []; st.probes = KURS ? KURS_PROBEN : 1; st.phase = 'design'; st.practice = $('live').checked;
     $('stamp').hidden = true; refresh();
   };
