@@ -150,6 +150,7 @@
     for (const sp of d.supports) {
       const { a, b, p, n } = sideOf(sp), t = [Math.abs(n[1]), Math.abs(n[0])];
       if (sp.kind === 'wand') for (const [q, k] of [[a, -1], [b, 1]]) grow(q[0] + t[0] * 0.3 * k + n[0] * 0.35, q[1] + t[1] * 0.3 * k + n[1] * 0.35);
+      else if (sp.kind === 'sym') for (const [q, k] of [[a, -1], [b, 1]]) grow(q[0] + t[0] * 0.6 * k + n[0] * 0.6, q[1] + t[1] * 0.6 * k + n[1] * 0.6);
       else for (const k of [-1, 1]) grow(p[0] + t[0] * 0.7 * k + n[0] * 1.15, p[1] + t[1] * 0.7 * k + n[1] * 1.15);
     }
     const px = Math.max(12, s * 0.45), labs = loadLabels(d, s);
@@ -456,6 +457,20 @@
           ctx.moveTo(x, y); ctx.lineTo(x + hx, y + hy);
         }
         ctx.stroke();
+      } else if (sp.kind === 'sym') {
+        // Symmetrie: Symmetrieebene strichpunktiert über die Kante hinaus, außen Rollen an einer Wand (hält nur senkrecht zur Kante)
+        const t = [Math.sign(b[0] - a[0]), Math.sign(b[1] - a[1])], len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+        const at = (u, o) => P([a[0] + t[0] * u + n[0] * o, a[1] + t[1] * u + n[1] * o]), r = 0.11;
+        ctx.save(); ctx.lineWidth = Math.max(1.5, s * 0.06);
+        ctx.setLineDash([s * 0.45, s * 0.12, s * 0.06, s * 0.12]);
+        ctx.beginPath(); ctx.moveTo(...at(-0.6, 0)); ctx.lineTo(...at(len + 0.6, 0)); ctx.stroke();
+        ctx.setLineDash([]);
+        for (let i = 0; i < len; i++) { const [x, y] = at(i + 0.5, r + 0.02); ctx.beginPath(); ctx.arc(x, y, r * s, 0, 7); ctx.fill(); ctx.stroke(); }
+        ctx.lineWidth = Math.max(2, s * 0.08); ctx.beginPath(); ctx.moveTo(...at(0, 2 * r + 0.04)); ctx.lineTo(...at(len, 2 * r + 0.04)); ctx.stroke();
+        ctx.lineWidth = 1; ctx.beginPath();
+        for (let u = 0; u < len; u += 0.25) { const [x0, y0] = at(u, 2 * r + 0.04), [x1, y1] = at(u + 0.2, 2 * r + 0.24); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
+        ctx.stroke();
+        ctx.restore();
       } else {
         // Symbol für ein Lager unter dem Bauteil, gedreht auf die jeweilige Seite
         const [cx, cy] = P(p), h = s * 0.7, w = s * 0.85;
@@ -857,7 +872,7 @@
   // loads: [{ keys, deg, kn }], sel: gewählte Last, auto: alle Lasten gleich groß und automatisch bemessen
   const ED_TX = 24, ED_TY = 16;
   // live: FE-Rechnung beim Bauen zeigen (je Gerät gemerkt), fe: deren Ergebnis für das Vollteil
-  const ed = { cells: null, walls: new Set(), pins: new Map(), loads: [], sel: -1, auto: true, tool: 'form', drag: null, hover: null, raw: null, res: null,
+  const ed = { cells: null, walls: new Set(), syms: new Set(), pins: new Map(), loads: [], sel: -1, auto: true, tool: 'form', drag: null, hover: null, raw: null, res: null,
     live: store.get('edlive') === true, fe: null };
   const vert = side => side === 'left' || side === 'right';
   const edHas = (x, y) => x >= 0 && y >= 0 && x < ED_TX && y < ED_TY && ed.cells[x + y * ED_TX] === 1;
@@ -868,7 +883,7 @@
     lager: 'Es fehlt ein Lager: Einspannung, Festlager oder Loslager auf eine Außenkante setzen.',
     last: 'Es fehlt eine Last: Mit „Last“ auf eine Außenkante klicken.',
     kante: 'Lager und Last müssen an einer Außenkante sitzen.',
-    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Um ein einzelnes Festlager dreht es sich, ein Loslager hält nur senkrecht zur Kante.',
+    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Um ein einzelnes Festlager dreht es sich, Loslager und Symmetrie halten nur senkrecht zur Kante.',
     bereich: 'Der Betrag läge nicht zwischen 1 und 100 kN. Last und Lager weiter auseinander setzen oder mehr Material stehen lassen.',
     voll: 'Schon das Vollteil hält diese Lasten nicht. Beträge verringern oder „Beträge automatisch“ wählen.',
   };
@@ -890,10 +905,10 @@
       const x = k % d.tx + ox, y = Math.floor(k / d.tx) + oy;
       if (x < ED_TX && y < ED_TY) ed.cells[x + y * ED_TX] = 1;
     }
-    ed.walls = new Set(); ed.pins = new Map();
+    ed.walls = new Set(); ed.syms = new Set(); ed.pins = new Map();
     for (const sp of d.supports) for (const [x, y] of sp.tiles) {
       const key = `${x + ox},${y + oy},${sp.side}`;
-      if (sp.kind === 'wand') ed.walls.add(key); else ed.pins.set(key, sp.kind);
+      if (sp.kind === 'wand') ed.walls.add(key); else if (sp.kind === 'sym') ed.syms.add(key); else ed.pins.set(key, sp.kind);
     }
     ed.loads = d.loads.map(ld => {
       const deg = Math.round(Math.atan2(ld.fy, ld.fx) / (Math.PI / 4)) * 45;
@@ -918,14 +933,16 @@
     const cells = new Uint8Array(tx * ty);
     for (let y = 0; y < ty; y++) for (let x = 0; x < tx; x++) cells[x + y * tx] = ed.cells[x + x0 + (y + y0) * ED_TX];
     const parse = key => { const [x, y, side] = key.split(','); return [+x - x0, +y - y0, side]; };
-    // Einspannungen: aneinanderstoßende Kanten derselben Seite zu einer Einspannung zusammenfassen
-    const walls = [...ed.walls].map(parse)
-      .sort((a, b) => a[2].localeCompare(b[2]) || (vert(a[2]) ? a[0] - b[0] || a[1] - b[1] : a[1] - b[1] || a[0] - b[0]));
+    // Einspannungen und Symmetrie: aneinanderstoßende Kanten derselben Seite zu einem Lager zusammenfassen
     const runs = [];
-    for (const [x, y, side] of walls) {
-      const r = runs.at(-1), q = r && r.tiles.at(-1);
-      if (r && r.side === side && (vert(side) ? q[0] === x && q[1] + 1 === y : q[1] === y && q[0] + 1 === x)) r.tiles.push([x, y]);
-      else runs.push({ kind: 'wand', side, tiles: [[x, y]] });
+    for (const [set, kind] of [[ed.walls, 'wand'], [ed.syms, 'sym']]) {
+      const keys = [...set].map(parse)
+        .sort((a, b) => a[2].localeCompare(b[2]) || (vert(a[2]) ? a[0] - b[0] || a[1] - b[1] : a[1] - b[1] || a[0] - b[0]));
+      for (const [x, y, side] of keys) {
+        const r = runs.at(-1), q = r && r.tiles.at(-1);
+        if (r && r.kind === kind && r.side === side && (vert(side) ? q[0] === x && q[1] + 1 === y : q[1] === y && q[0] + 1 === x)) r.tiles.push([x, y]);
+        else runs.push({ kind, side, tiles: [[x, y]] });
+      }
     }
     const pins = [...ed.pins].map(([key, kind]) => { const [x, y, side] = parse(key); return { kind, side, tiles: [[x, y]] }; });
     const loads = ed.loads.map(l => { const t = l.keys.map(parse); return { side: t[0][2], tiles: t.map(([x, y]) => [x, y]), deg: l.deg, kn: l.kn }; });
@@ -934,6 +951,7 @@
   // Nach jeder Änderung: ungültige Kanten entfernen, prüfen, Lasten bemessen, zeichnen
   function edUpdate() {
     for (const k of ed.walls) if (!edFree(k)) ed.walls.delete(k);
+    for (const k of ed.syms) if (!edFree(k)) ed.syms.delete(k);
     for (const k of [...ed.pins.keys()]) if (!edFree(k)) ed.pins.delete(k);
     ed.loads = ed.loads.filter(l => l.keys.every(edFree));
     if (ed.sel < 0 || ed.sel >= ed.loads.length) ed.sel = ed.loads.length - 1;
@@ -961,7 +979,7 @@
   }
   // FE-Rechnung live (wahlweise): das Vollteil rechnen, sobald Lager und Lasten mit bekanntem Betrag da sind
   function edFe() {
-    ed.fe = ed.live && ed.loads.length && (ed.walls.size || ed.pins.size) && !(ed.auto && !ed.res.def) ? FEM.analyze(st.L, ed.cells) : null;
+    ed.fe = ed.live && ed.loads.length && (ed.walls.size || ed.syms.size || ed.pins.size) && !(ed.auto && !ed.res.def) ? FEM.analyze(st.L, ed.cells) : null;
     if (ed.fe) showFem(ed.fe, 0); else { $('legend').hidden = true; $('femline').textContent = ''; }
   }
   // Feld für die gewählte Last: Nummer, Richtung, Betrag (bei Automatik nur zur Anzeige)
@@ -1005,7 +1023,7 @@
       ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.strokeRect(G.ox + x * s + 1, G.oy - (y + 1) * s + 1, s - 2, s - 2);
     }
     // Kanten, auf die das Werkzeug wirken würde, mit „Last“ dazu die gewählte Last
-    const keys = ed.tool === 'form' || (d && d.load != null) ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand') : ed.hover ? [ed.hover] : [];
+    const keys = ed.tool === 'form' || (d && d.load != null) ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand' || ed.tool === 'sym') : ed.hover ? [ed.hover] : [];
     if (ed.tool === 'last' && ed.loads[ed.sel]) keys.push(...ed.loads[ed.sel].keys);
     ctx.save(); ctx.strokeStyle = C.accent; ctx.lineWidth = Math.max(3, s * 0.16); ctx.lineCap = 'round'; ctx.beginPath();
     for (const key of keys) {
@@ -1047,11 +1065,11 @@
     return out;
   }
   function edApply(keys, click) {
-    const clear = k => { ed.walls.delete(k); ed.pins.delete(k); ed.loads = ed.loads.filter(l => !l.keys.includes(k)); };
+    const clear = k => { ed.walls.delete(k); ed.syms.delete(k); ed.pins.delete(k); ed.loads = ed.loads.filter(l => !l.keys.includes(k)); };
     const t = ed.tool;
-    if (t === 'wand') {
-      const on = keys.every(k => ed.walls.has(k));
-      for (const k of keys) if (on) ed.walls.delete(k); else { clear(k); ed.walls.add(k); }
+    if (t === 'wand' || t === 'sym') {   // ganze Kante oder gezogenes Stück; liegt schon überall dasselbe, kommt es weg
+      const set = t === 'wand' ? ed.walls : ed.syms, on = keys.every(k => set.has(k));
+      for (const k of keys) if (on) set.delete(k); else { clear(k); set.add(k); }
     } else if (t === 'fest' || t === 'los') {
       const k = keys[0];
       if (ed.pins.get(k) === t) ed.pins.delete(k); else { clear(k); ed.pins.set(k, t); }
@@ -1129,7 +1147,7 @@
     if (ed.tool === 'form') {
       for (let y = Math.min(d.a[1], d.b[1]); y <= Math.max(d.a[1], d.b[1]); y++)
         for (let x = Math.min(d.a[0], d.b[0]); x <= Math.max(d.a[0], d.b[0]); x++) ed.cells[x + y * ED_TX] = d.v;
-    } else edApply(edRun(d.a, d.b, ed.tool === 'wand'), d.a === d.b);
+    } else edApply(edRun(d.a, d.b, ed.tool === 'wand' || ed.tool === 'sym'), d.a === d.b);
     edUpdate();
   });
   cv.addEventListener('pointerleave', () => { cv.classList.remove('grab'); if (st.phase === 'edit' && ed.hover) { ed.hover = null; render(); } });
@@ -1146,7 +1164,7 @@
     store.set('bau', code);   // für den Wettkampf und das nächste Mal
     loadLevel(CUSTOM, code);
   };
-  $('b-clear').onclick = () => { ed.cells.fill(0); ed.walls.clear(); ed.pins.clear(); ed.loads = []; edUpdate(); };
+  $('b-clear').onclick = () => { ed.cells.fill(0); ed.walls.clear(); ed.syms.clear(); ed.pins.clear(); ed.loads = []; edUpdate(); };
   // gewählte Last: Richtung, Betrag (0,5 bis 100 kN), entfernen; Automatik für alle Lasten
   $('l-dirs').onclick = e => {
     const b = e.target.closest('button'), l = ed.loads[ed.sel];

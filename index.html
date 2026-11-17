@@ -218,6 +218,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
             <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
+            <b>Symmetrie</b> setzt sich wie die Einspannung, hält die Kante aber nur senkrecht zu ihr: So spielt man ein Halbmodell, die Kante ist die Symmetrieebene.
             <b>Last</b>: Ein Klick auf eine freie Außenkante setzt eine weitere Last, Ziehen verteilt sie über mehrere Kacheln. Ein Klick auf eine Last wählt sie aus, ein zweiter dreht sie um 45°. Den Betrag ändern Sie auch, indem Sie einen Pfeil am freien Ende länger oder kürzer ziehen.
             Richtung und Betrag der gewählten Last stellen Sie rechts ein; mit „Beträge automatisch“ werden alle Lasten gleich groß und so bemessen, dass das Vollteil zu gut 50 % ausgelastet ist. „FE-Rechnung live zeigen“ färbt das Vollteil nach jeder Änderung nach seiner Auslastung. Beim Spielen steht das Bauteil im Link der Seite.</p>
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
@@ -239,6 +240,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <button type="button" data-t="wand" aria-pressed="false">Einspannung</button>
             <button type="button" data-t="fest" aria-pressed="false">Festlager</button>
             <button type="button" data-t="los" aria-pressed="false">Loslager</button>
+            <button type="button" data-t="sym" aria-pressed="false" title="Symmetrieebene: hält die ganze Kante nur senkrecht zu ihr">Symmetrie</button>
             <button type="button" data-t="last" aria-pressed="false">Last</button>
           </div>
         </div>
@@ -321,6 +323,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
             <li>Lager: Die Einspannung hält die ganze Kante. Fest- und Loslager sind Gelenke in der Mitte der Kante, wie in der Technischen Mechanik: Sie übertragen kein Moment, das Festlager hält in beide Richtungen, das Loslager nur senkrecht zur Kante. Ihre Kachel ist die Lagerplatte, steif und ohne eigenen Nachweis. Gelagert ist nur, was die Lagerkante mit einer ganzen Seite berührt, nicht nur mit einer Ecke.</li>
+            <li>Symmetrie: Die Kante ist die Schnittfläche eines Halbmodells. Sie wird auf ganzer Länge nur senkrecht zu sich gehalten und darf entlang der Kante gleiten, wie im ANSYS-Modell mit Symmetry Region. Was nur an dieser Kante hängt, fällt ab, denn im ganzen Bauteil hinge es nur an seinem Spiegelbild. Das Halbmodell rechnet so wie das ganze Bauteil mit dem gespiegelten Entwurf.</li>
             <li id="rule-eso">Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
@@ -480,12 +483,16 @@ const FEM = (() => {
     const domain = new Uint8Array(nT).fill(1);
     for (const [tx, ty] of def.cut || []) domain[tx + ty * TX] = 0;
     const frozen = new Uint8Array(nT), supportTiles = [], supportSides = new Uint8Array(nT), loadTiles = [];
+    // Anker: Lager, an denen ein Teil hängen bleibt. Das Symmetrie-Lager zählt nicht: Was nur an der Symmetriekante
+    // hängt, hinge im ganzen Bauteil nur an seinem Spiegelbild und fällt dort wie hier ab.
+    const anchorTiles = [], anchorSides = new Uint8Array(nT);
     // Knotennummerierung entlang der kurzen Seite hält die Bandbreite klein
     const base = nx >= ny ? (i, j) => i * (ny + 1) + j : (i, j) => j * (nx + 1) + i;
     const nBase = (nx + 1) * (ny + 1);
     for (const s of def.supports) for (const [tx, ty] of s.tiles) {
       supportTiles.push(tx + ty * TX);
       supportSides[tx + ty * TX] |= SIDEBIT[s.side];
+      if (s.kind !== 'sym') { anchorTiles.push(tx + ty * TX); anchorSides[tx + ty * TX] |= SIDEBIT[s.side]; }
       if (s.lock) frozen[tx + ty * TX] = 1;
     }
     // Knotenlasten [i, j, tx, ty, fx, fy]: je Lastkachel, damit sie an deren Knotenkopie angreifen (siehe nodeKey)
@@ -499,7 +506,7 @@ const FEM = (() => {
         for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) loadList.push([i, j, tx, ty, l.fx / n / 2, l.fy / n / 2]);
       }
     }
-    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, loadList };
+    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, anchorTiles, anchorSides, loadTiles, base, nBase, loadList };
   }
 
   // Kacheln, die über Kanten mit den Startkacheln verbunden sind. Verbunden heißt: beide Kacheln haben auf der
@@ -517,8 +524,8 @@ const FEM = (() => {
     }
     return seen;
   }
-  // Was am Lager hängt; eine Lagerkachel zählt nur mit Material auf der gelagerten Seite
-  const attached = (L, solid) => connect(L, solid, L.supportTiles.filter(k => SIDES[solid[k]] & L.supportSides[k]));
+  // Was am Lager hängt; eine Lagerkachel zählt nur mit Material auf der gelagerten Seite, Symmetrie-Lager zählen nicht (siehe level)
+  const attached = (L, solid) => connect(L, solid, L.anchorTiles.filter(k => SIDES[solid[k]] & L.anchorSides[k]));
   // Fläche in Kacheln: halbe Kacheln zählen halb
   const area = (solid, set) => solid.reduce((a, s, k) => a + (set[k] ? AREA[s] : 0), 0);
 
@@ -761,6 +768,8 @@ const PARTS = (FEM => {
   }
   const line = (n, f) => Array.from({ length: n }, (_, i) => f(i));
   const wall = (tiles, side) => ({ kind: 'wand', tiles, side, fix: 3 });
+  // Symmetrie: Die ganze Kante hält nur senkrecht zu sich, wie die Schnittfläche eines Halbmodells; entlang der Kante frei
+  const sym = (tiles, side) => ({ kind: 'sym', tiles, side, fix: side === 'left' || side === 'right' ? 1 : 2 });
   // Das Loslager hält nur senkrecht zur Auflagefläche
   const pin = (kind, tile, side) => ({ kind, tiles: [tile], side, lock: true, fix: kind === 'fest' ? 3 : side === 'left' || side === 'right' ? 1 : 2 });
   const load = (tiles, side, deg, kn = 1) => ({ tiles, side, fx: DIR[deg][0] * 1000 * kn, fy: DIR[deg][1] * 1000 * kn });   // kn in kN
@@ -994,7 +1003,7 @@ const PARTS = (FEM => {
     const g = grid(raw.tx, raw.ty, 0);
     g.c.set(raw.cells);
     return { tx: g.tx, ty: g.ty, cut: cutOf(g),
-      supports: raw.supports.map(s => s.kind === 'wand' ? wall(s.tiles, s.side) : pin(s.kind, s.tiles[0], s.side)),
+      supports: raw.supports.map(s => s.kind === 'wand' ? wall(s.tiles, s.side) : s.kind === 'sym' ? sym(s.tiles, s.side) : pin(s.kind, s.tiles[0], s.side)),
       loads: raw.loads.map(l => load(l.tiles, l.side, l.deg, raw.auto ? 1 : l.kn)) };
   }
   // build: prüfen und bei auto die Lasten bemessen. Ergebnis { def } oder { error }:
@@ -1011,10 +1020,11 @@ const PARTS = (FEM => {
     return error ? { error } : { def };
   }
   // Code für Link und Wettkampf: Version, Breite und Höhe (Basis 36), Material (6 Bit je Zeichen),
-  // je Lager Art, Seite, x, y, Anzahl; je Last Seite, x, y, Anzahl, Richtung in 45°-Schritten und Betrag in 0,1 kN
-  // (zwei Zeichen, Basis 36). Version 1 kannte nur eine Last ohne Betrag, sie wird automatisch bemessen.
+  // je Lager Art (w Einspannung, f Festlager, l Loslager, s Symmetrie), Seite, x, y, Anzahl; je Last Seite, x, y, Anzahl,
+  // Richtung in 45°-Schritten und Betrag in 0,1 kN (zwei Zeichen, Basis 36). Version 1 kannte nur eine Last ohne Betrag,
+  // sie wird automatisch bemessen. Codes mit Symmetrie gibt es seit 0.15.0, ältere Fassungen lesen sie nicht.
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-  const SIDES = { L: 'left', R: 'right', T: 'top', B: 'bottom' }, KINDS = { w: 'wand', f: 'fest', l: 'los' };
+  const SIDES = { L: 'left', R: 'right', T: 'top', B: 'bottom' }, KINDS = { w: 'wand', f: 'fest', l: 'los', s: 'sym' };
   const DEGS = [0, 45, 90, 135, 180, -135, -90, -45];
   const letter = (map, v) => Object.keys(map).find(k => map[k] === v);
   function encode(raw) {
@@ -1030,7 +1040,7 @@ const PARTS = (FEM => {
       '.' + raw.loads.map(l => run(l) + DEGS.indexOf(l.deg) + Math.round(l.kn * 10).toString(36).padStart(2, '0')).join('');
   }
   function decode(code) {
-    const m = /^([12])([0-9a-z])([0-9a-z])\.([A-Za-z0-9_-]+)\.((?:[wfl][LRTB][0-9a-z]{3})*)\.([LRTB0-9a-z]+)$/.exec(String(code));
+    const m = /^([12])([0-9a-z])([0-9a-z])\.([A-Za-z0-9_-]+)\.((?:[wfls][LRTB][0-9a-z]{3})*)\.([LRTB0-9a-z]+)$/.exec(String(code));
     if (!m) return null;
     const v2 = m[1] === '2', tx = parseInt(m[2], 36), ty = parseInt(m[3], 36);
     const lds = v2 ? /^(?:[LRTB][0-9a-z]{3}[0-7][0-9a-z]{2})+$/.test(m[6]) && m[6].match(/.{7}/g) : /^[LRTB][0-9a-z]{3}[0-7]$/.test(m[6]) && [m[6]];
@@ -1045,7 +1055,7 @@ const PARTS = (FEM => {
       return { side, tiles: line(n, i => vert ? [x, y + i] : [x + i, y]) };
     };
     const supports = (m[5].match(/.{5}/g) || []).map(t => ({ kind: KINDS[t[0]], ...run(t.slice(1)) }));
-    if (supports.some(s => s.kind !== 'wand' && s.tiles.length !== 1)) return null;
+    if (supports.some(s => (s.kind === 'fest' || s.kind === 'los') && s.tiles.length !== 1)) return null;
     const loads = lds.map(t => ({ ...run(t), deg: DEGS[+t[4]], kn: v2 ? parseInt(t.slice(5), 36) / 10 : 1 }));
     if (loads.some(l => !(l.kn >= 0.1 && l.kn <= 100))) return null;
     return { tx, ty, cells, supports, loads, auto: !v2 };
@@ -1249,6 +1259,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     for (const sp of d.supports) {
       const { a, b, p, n } = sideOf(sp), t = [Math.abs(n[1]), Math.abs(n[0])];
       if (sp.kind === 'wand') for (const [q, k] of [[a, -1], [b, 1]]) grow(q[0] + t[0] * 0.3 * k + n[0] * 0.35, q[1] + t[1] * 0.3 * k + n[1] * 0.35);
+      else if (sp.kind === 'sym') for (const [q, k] of [[a, -1], [b, 1]]) grow(q[0] + t[0] * 0.6 * k + n[0] * 0.6, q[1] + t[1] * 0.6 * k + n[1] * 0.6);
       else for (const k of [-1, 1]) grow(p[0] + t[0] * 0.7 * k + n[0] * 1.15, p[1] + t[1] * 0.7 * k + n[1] * 1.15);
     }
     const px = Math.max(12, s * 0.45), labs = loadLabels(d, s);
@@ -1555,6 +1566,20 @@ if (typeof module !== 'undefined') module.exports = TICKET;
           ctx.moveTo(x, y); ctx.lineTo(x + hx, y + hy);
         }
         ctx.stroke();
+      } else if (sp.kind === 'sym') {
+        // Symmetrie: Symmetrieebene strichpunktiert über die Kante hinaus, außen Rollen an einer Wand (hält nur senkrecht zur Kante)
+        const t = [Math.sign(b[0] - a[0]), Math.sign(b[1] - a[1])], len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+        const at = (u, o) => P([a[0] + t[0] * u + n[0] * o, a[1] + t[1] * u + n[1] * o]), r = 0.11;
+        ctx.save(); ctx.lineWidth = Math.max(1.5, s * 0.06);
+        ctx.setLineDash([s * 0.45, s * 0.12, s * 0.06, s * 0.12]);
+        ctx.beginPath(); ctx.moveTo(...at(-0.6, 0)); ctx.lineTo(...at(len + 0.6, 0)); ctx.stroke();
+        ctx.setLineDash([]);
+        for (let i = 0; i < len; i++) { const [x, y] = at(i + 0.5, r + 0.02); ctx.beginPath(); ctx.arc(x, y, r * s, 0, 7); ctx.fill(); ctx.stroke(); }
+        ctx.lineWidth = Math.max(2, s * 0.08); ctx.beginPath(); ctx.moveTo(...at(0, 2 * r + 0.04)); ctx.lineTo(...at(len, 2 * r + 0.04)); ctx.stroke();
+        ctx.lineWidth = 1; ctx.beginPath();
+        for (let u = 0; u < len; u += 0.25) { const [x0, y0] = at(u, 2 * r + 0.04), [x1, y1] = at(u + 0.2, 2 * r + 0.24); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
+        ctx.stroke();
+        ctx.restore();
       } else {
         // Symbol für ein Lager unter dem Bauteil, gedreht auf die jeweilige Seite
         const [cx, cy] = P(p), h = s * 0.7, w = s * 0.85;
@@ -1956,7 +1981,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   // loads: [{ keys, deg, kn }], sel: gewählte Last, auto: alle Lasten gleich groß und automatisch bemessen
   const ED_TX = 24, ED_TY = 16;
   // live: FE-Rechnung beim Bauen zeigen (je Gerät gemerkt), fe: deren Ergebnis für das Vollteil
-  const ed = { cells: null, walls: new Set(), pins: new Map(), loads: [], sel: -1, auto: true, tool: 'form', drag: null, hover: null, raw: null, res: null,
+  const ed = { cells: null, walls: new Set(), syms: new Set(), pins: new Map(), loads: [], sel: -1, auto: true, tool: 'form', drag: null, hover: null, raw: null, res: null,
     live: store.get('edlive') === true, fe: null };
   const vert = side => side === 'left' || side === 'right';
   const edHas = (x, y) => x >= 0 && y >= 0 && x < ED_TX && y < ED_TY && ed.cells[x + y * ED_TX] === 1;
@@ -1967,7 +1992,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     lager: 'Es fehlt ein Lager: Einspannung, Festlager oder Loslager auf eine Außenkante setzen.',
     last: 'Es fehlt eine Last: Mit „Last“ auf eine Außenkante klicken.',
     kante: 'Lager und Last müssen an einer Außenkante sitzen.',
-    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Um ein einzelnes Festlager dreht es sich, ein Loslager hält nur senkrecht zur Kante.',
+    beweglich: 'So kann sich das Bauteil noch bewegen (Starrkörperbewegung). Lager ergänzen: Um ein einzelnes Festlager dreht es sich, Loslager und Symmetrie halten nur senkrecht zur Kante.',
     bereich: 'Der Betrag läge nicht zwischen 1 und 100 kN. Last und Lager weiter auseinander setzen oder mehr Material stehen lassen.',
     voll: 'Schon das Vollteil hält diese Lasten nicht. Beträge verringern oder „Beträge automatisch“ wählen.',
   };
@@ -1989,10 +2014,10 @@ if (typeof module !== 'undefined') module.exports = TICKET;
       const x = k % d.tx + ox, y = Math.floor(k / d.tx) + oy;
       if (x < ED_TX && y < ED_TY) ed.cells[x + y * ED_TX] = 1;
     }
-    ed.walls = new Set(); ed.pins = new Map();
+    ed.walls = new Set(); ed.syms = new Set(); ed.pins = new Map();
     for (const sp of d.supports) for (const [x, y] of sp.tiles) {
       const key = `${x + ox},${y + oy},${sp.side}`;
-      if (sp.kind === 'wand') ed.walls.add(key); else ed.pins.set(key, sp.kind);
+      if (sp.kind === 'wand') ed.walls.add(key); else if (sp.kind === 'sym') ed.syms.add(key); else ed.pins.set(key, sp.kind);
     }
     ed.loads = d.loads.map(ld => {
       const deg = Math.round(Math.atan2(ld.fy, ld.fx) / (Math.PI / 4)) * 45;
@@ -2017,14 +2042,16 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     const cells = new Uint8Array(tx * ty);
     for (let y = 0; y < ty; y++) for (let x = 0; x < tx; x++) cells[x + y * tx] = ed.cells[x + x0 + (y + y0) * ED_TX];
     const parse = key => { const [x, y, side] = key.split(','); return [+x - x0, +y - y0, side]; };
-    // Einspannungen: aneinanderstoßende Kanten derselben Seite zu einer Einspannung zusammenfassen
-    const walls = [...ed.walls].map(parse)
-      .sort((a, b) => a[2].localeCompare(b[2]) || (vert(a[2]) ? a[0] - b[0] || a[1] - b[1] : a[1] - b[1] || a[0] - b[0]));
+    // Einspannungen und Symmetrie: aneinanderstoßende Kanten derselben Seite zu einem Lager zusammenfassen
     const runs = [];
-    for (const [x, y, side] of walls) {
-      const r = runs.at(-1), q = r && r.tiles.at(-1);
-      if (r && r.side === side && (vert(side) ? q[0] === x && q[1] + 1 === y : q[1] === y && q[0] + 1 === x)) r.tiles.push([x, y]);
-      else runs.push({ kind: 'wand', side, tiles: [[x, y]] });
+    for (const [set, kind] of [[ed.walls, 'wand'], [ed.syms, 'sym']]) {
+      const keys = [...set].map(parse)
+        .sort((a, b) => a[2].localeCompare(b[2]) || (vert(a[2]) ? a[0] - b[0] || a[1] - b[1] : a[1] - b[1] || a[0] - b[0]));
+      for (const [x, y, side] of keys) {
+        const r = runs.at(-1), q = r && r.tiles.at(-1);
+        if (r && r.kind === kind && r.side === side && (vert(side) ? q[0] === x && q[1] + 1 === y : q[1] === y && q[0] + 1 === x)) r.tiles.push([x, y]);
+        else runs.push({ kind, side, tiles: [[x, y]] });
+      }
     }
     const pins = [...ed.pins].map(([key, kind]) => { const [x, y, side] = parse(key); return { kind, side, tiles: [[x, y]] }; });
     const loads = ed.loads.map(l => { const t = l.keys.map(parse); return { side: t[0][2], tiles: t.map(([x, y]) => [x, y]), deg: l.deg, kn: l.kn }; });
@@ -2033,6 +2060,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   // Nach jeder Änderung: ungültige Kanten entfernen, prüfen, Lasten bemessen, zeichnen
   function edUpdate() {
     for (const k of ed.walls) if (!edFree(k)) ed.walls.delete(k);
+    for (const k of ed.syms) if (!edFree(k)) ed.syms.delete(k);
     for (const k of [...ed.pins.keys()]) if (!edFree(k)) ed.pins.delete(k);
     ed.loads = ed.loads.filter(l => l.keys.every(edFree));
     if (ed.sel < 0 || ed.sel >= ed.loads.length) ed.sel = ed.loads.length - 1;
@@ -2060,7 +2088,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
   }
   // FE-Rechnung live (wahlweise): das Vollteil rechnen, sobald Lager und Lasten mit bekanntem Betrag da sind
   function edFe() {
-    ed.fe = ed.live && ed.loads.length && (ed.walls.size || ed.pins.size) && !(ed.auto && !ed.res.def) ? FEM.analyze(st.L, ed.cells) : null;
+    ed.fe = ed.live && ed.loads.length && (ed.walls.size || ed.syms.size || ed.pins.size) && !(ed.auto && !ed.res.def) ? FEM.analyze(st.L, ed.cells) : null;
     if (ed.fe) showFem(ed.fe, 0); else { $('legend').hidden = true; $('femline').textContent = ''; }
   }
   // Feld für die gewählte Last: Nummer, Richtung, Betrag (bei Automatik nur zur Anzeige)
@@ -2104,7 +2132,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
       ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.strokeRect(G.ox + x * s + 1, G.oy - (y + 1) * s + 1, s - 2, s - 2);
     }
     // Kanten, auf die das Werkzeug wirken würde, mit „Last“ dazu die gewählte Last
-    const keys = ed.tool === 'form' || (d && d.load != null) ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand') : ed.hover ? [ed.hover] : [];
+    const keys = ed.tool === 'form' || (d && d.load != null) ? [] : d ? edRun(d.a, d.b, ed.tool === 'wand' || ed.tool === 'sym') : ed.hover ? [ed.hover] : [];
     if (ed.tool === 'last' && ed.loads[ed.sel]) keys.push(...ed.loads[ed.sel].keys);
     ctx.save(); ctx.strokeStyle = C.accent; ctx.lineWidth = Math.max(3, s * 0.16); ctx.lineCap = 'round'; ctx.beginPath();
     for (const key of keys) {
@@ -2146,11 +2174,11 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     return out;
   }
   function edApply(keys, click) {
-    const clear = k => { ed.walls.delete(k); ed.pins.delete(k); ed.loads = ed.loads.filter(l => !l.keys.includes(k)); };
+    const clear = k => { ed.walls.delete(k); ed.syms.delete(k); ed.pins.delete(k); ed.loads = ed.loads.filter(l => !l.keys.includes(k)); };
     const t = ed.tool;
-    if (t === 'wand') {
-      const on = keys.every(k => ed.walls.has(k));
-      for (const k of keys) if (on) ed.walls.delete(k); else { clear(k); ed.walls.add(k); }
+    if (t === 'wand' || t === 'sym') {   // ganze Kante oder gezogenes Stück; liegt schon überall dasselbe, kommt es weg
+      const set = t === 'wand' ? ed.walls : ed.syms, on = keys.every(k => set.has(k));
+      for (const k of keys) if (on) set.delete(k); else { clear(k); set.add(k); }
     } else if (t === 'fest' || t === 'los') {
       const k = keys[0];
       if (ed.pins.get(k) === t) ed.pins.delete(k); else { clear(k); ed.pins.set(k, t); }
@@ -2228,7 +2256,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     if (ed.tool === 'form') {
       for (let y = Math.min(d.a[1], d.b[1]); y <= Math.max(d.a[1], d.b[1]); y++)
         for (let x = Math.min(d.a[0], d.b[0]); x <= Math.max(d.a[0], d.b[0]); x++) ed.cells[x + y * ED_TX] = d.v;
-    } else edApply(edRun(d.a, d.b, ed.tool === 'wand'), d.a === d.b);
+    } else edApply(edRun(d.a, d.b, ed.tool === 'wand' || ed.tool === 'sym'), d.a === d.b);
     edUpdate();
   });
   cv.addEventListener('pointerleave', () => { cv.classList.remove('grab'); if (st.phase === 'edit' && ed.hover) { ed.hover = null; render(); } });
@@ -2245,7 +2273,7 @@ if (typeof module !== 'undefined') module.exports = TICKET;
     store.set('bau', code);   // für den Wettkampf und das nächste Mal
     loadLevel(CUSTOM, code);
   };
-  $('b-clear').onclick = () => { ed.cells.fill(0); ed.walls.clear(); ed.pins.clear(); ed.loads = []; edUpdate(); };
+  $('b-clear').onclick = () => { ed.cells.fill(0); ed.walls.clear(); ed.syms.clear(); ed.pins.clear(); ed.loads = []; edUpdate(); };
   // gewählte Last: Richtung, Betrag (0,5 bis 100 kN), entfernen; Automatik für alle Lasten
   $('l-dirs').onclick = e => {
     const b = e.target.closest('button'), l = ed.loads[ed.sel];

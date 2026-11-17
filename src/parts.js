@@ -35,6 +35,8 @@ const PARTS = (FEM => {
   }
   const line = (n, f) => Array.from({ length: n }, (_, i) => f(i));
   const wall = (tiles, side) => ({ kind: 'wand', tiles, side, fix: 3 });
+  // Symmetrie: Die ganze Kante hält nur senkrecht zu sich, wie die Schnittfläche eines Halbmodells; entlang der Kante frei
+  const sym = (tiles, side) => ({ kind: 'sym', tiles, side, fix: side === 'left' || side === 'right' ? 1 : 2 });
   // Das Loslager hält nur senkrecht zur Auflagefläche
   const pin = (kind, tile, side) => ({ kind, tiles: [tile], side, lock: true, fix: kind === 'fest' ? 3 : side === 'left' || side === 'right' ? 1 : 2 });
   const load = (tiles, side, deg, kn = 1) => ({ tiles, side, fx: DIR[deg][0] * 1000 * kn, fy: DIR[deg][1] * 1000 * kn });   // kn in kN
@@ -268,7 +270,7 @@ const PARTS = (FEM => {
     const g = grid(raw.tx, raw.ty, 0);
     g.c.set(raw.cells);
     return { tx: g.tx, ty: g.ty, cut: cutOf(g),
-      supports: raw.supports.map(s => s.kind === 'wand' ? wall(s.tiles, s.side) : pin(s.kind, s.tiles[0], s.side)),
+      supports: raw.supports.map(s => s.kind === 'wand' ? wall(s.tiles, s.side) : s.kind === 'sym' ? sym(s.tiles, s.side) : pin(s.kind, s.tiles[0], s.side)),
       loads: raw.loads.map(l => load(l.tiles, l.side, l.deg, raw.auto ? 1 : l.kn)) };
   }
   // build: prüfen und bei auto die Lasten bemessen. Ergebnis { def } oder { error }:
@@ -285,10 +287,11 @@ const PARTS = (FEM => {
     return error ? { error } : { def };
   }
   // Code für Link und Wettkampf: Version, Breite und Höhe (Basis 36), Material (6 Bit je Zeichen),
-  // je Lager Art, Seite, x, y, Anzahl; je Last Seite, x, y, Anzahl, Richtung in 45°-Schritten und Betrag in 0,1 kN
-  // (zwei Zeichen, Basis 36). Version 1 kannte nur eine Last ohne Betrag, sie wird automatisch bemessen.
+  // je Lager Art (w Einspannung, f Festlager, l Loslager, s Symmetrie), Seite, x, y, Anzahl; je Last Seite, x, y, Anzahl,
+  // Richtung in 45°-Schritten und Betrag in 0,1 kN (zwei Zeichen, Basis 36). Version 1 kannte nur eine Last ohne Betrag,
+  // sie wird automatisch bemessen. Codes mit Symmetrie gibt es seit 0.15.0, ältere Fassungen lesen sie nicht.
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-  const SIDES = { L: 'left', R: 'right', T: 'top', B: 'bottom' }, KINDS = { w: 'wand', f: 'fest', l: 'los' };
+  const SIDES = { L: 'left', R: 'right', T: 'top', B: 'bottom' }, KINDS = { w: 'wand', f: 'fest', l: 'los', s: 'sym' };
   const DEGS = [0, 45, 90, 135, 180, -135, -90, -45];
   const letter = (map, v) => Object.keys(map).find(k => map[k] === v);
   function encode(raw) {
@@ -304,7 +307,7 @@ const PARTS = (FEM => {
       '.' + raw.loads.map(l => run(l) + DEGS.indexOf(l.deg) + Math.round(l.kn * 10).toString(36).padStart(2, '0')).join('');
   }
   function decode(code) {
-    const m = /^([12])([0-9a-z])([0-9a-z])\.([A-Za-z0-9_-]+)\.((?:[wfl][LRTB][0-9a-z]{3})*)\.([LRTB0-9a-z]+)$/.exec(String(code));
+    const m = /^([12])([0-9a-z])([0-9a-z])\.([A-Za-z0-9_-]+)\.((?:[wfls][LRTB][0-9a-z]{3})*)\.([LRTB0-9a-z]+)$/.exec(String(code));
     if (!m) return null;
     const v2 = m[1] === '2', tx = parseInt(m[2], 36), ty = parseInt(m[3], 36);
     const lds = v2 ? /^(?:[LRTB][0-9a-z]{3}[0-7][0-9a-z]{2})+$/.test(m[6]) && m[6].match(/.{7}/g) : /^[LRTB][0-9a-z]{3}[0-7]$/.test(m[6]) && [m[6]];
@@ -319,7 +322,7 @@ const PARTS = (FEM => {
       return { side, tiles: line(n, i => vert ? [x, y + i] : [x + i, y]) };
     };
     const supports = (m[5].match(/.{5}/g) || []).map(t => ({ kind: KINDS[t[0]], ...run(t.slice(1)) }));
-    if (supports.some(s => s.kind !== 'wand' && s.tiles.length !== 1)) return null;
+    if (supports.some(s => (s.kind === 'fest' || s.kind === 'los') && s.tiles.length !== 1)) return null;
     const loads = lds.map(t => ({ ...run(t), deg: DEGS[+t[4]], kn: v2 ? parseInt(t.slice(5), 36) / 10 : 1 }));
     if (loads.some(l => !(l.kn >= 0.1 && l.kn <= 100))) return null;
     return { tx, ty, cells, supports, loads, auto: !v2 };

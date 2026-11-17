@@ -126,12 +126,16 @@ const FEM = (() => {
     const domain = new Uint8Array(nT).fill(1);
     for (const [tx, ty] of def.cut || []) domain[tx + ty * TX] = 0;
     const frozen = new Uint8Array(nT), supportTiles = [], supportSides = new Uint8Array(nT), loadTiles = [];
+    // Anker: Lager, an denen ein Teil hängen bleibt. Das Symmetrie-Lager zählt nicht: Was nur an der Symmetriekante
+    // hängt, hinge im ganzen Bauteil nur an seinem Spiegelbild und fällt dort wie hier ab.
+    const anchorTiles = [], anchorSides = new Uint8Array(nT);
     // Knotennummerierung entlang der kurzen Seite hält die Bandbreite klein
     const base = nx >= ny ? (i, j) => i * (ny + 1) + j : (i, j) => j * (nx + 1) + i;
     const nBase = (nx + 1) * (ny + 1);
     for (const s of def.supports) for (const [tx, ty] of s.tiles) {
       supportTiles.push(tx + ty * TX);
       supportSides[tx + ty * TX] |= SIDEBIT[s.side];
+      if (s.kind !== 'sym') { anchorTiles.push(tx + ty * TX); anchorSides[tx + ty * TX] |= SIDEBIT[s.side]; }
       if (s.lock) frozen[tx + ty * TX] = 1;
     }
     // Knotenlasten [i, j, tx, ty, fx, fy]: je Lastkachel, damit sie an deren Knotenkopie angreifen (siehe nodeKey)
@@ -145,7 +149,7 @@ const FEM = (() => {
         for (let k = 0; k < M; k++) for (const [i, j] of [nodes[k], nodes[k + 1]]) loadList.push([i, j, tx, ty, l.fx / n / 2, l.fy / n / 2]);
       }
     }
-    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, loadTiles, base, nBase, loadList };
+    return { def, TX, TY, nx, ny, nT, domain, frozen, supportTiles, supportSides, anchorTiles, anchorSides, loadTiles, base, nBase, loadList };
   }
 
   // Kacheln, die über Kanten mit den Startkacheln verbunden sind. Verbunden heißt: beide Kacheln haben auf der
@@ -163,8 +167,8 @@ const FEM = (() => {
     }
     return seen;
   }
-  // Was am Lager hängt; eine Lagerkachel zählt nur mit Material auf der gelagerten Seite
-  const attached = (L, solid) => connect(L, solid, L.supportTiles.filter(k => SIDES[solid[k]] & L.supportSides[k]));
+  // Was am Lager hängt; eine Lagerkachel zählt nur mit Material auf der gelagerten Seite, Symmetrie-Lager zählen nicht (siehe level)
+  const attached = (L, solid) => connect(L, solid, L.anchorTiles.filter(k => SIDES[solid[k]] & L.anchorSides[k]));
   // Fläche in Kacheln: halbe Kacheln zählen halb
   const area = (solid, set) => solid.reduce((a, s, k) => a + (set[k] ? AREA[s] : 0), 0);
 

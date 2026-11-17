@@ -118,7 +118,7 @@ Lineare Dreiecke können keine Biegung im Element abbilden und sind deshalb stei
 
 **Welche Kacheln gerechnet werden.** Zuerst prüft das Spiel den Zusammenhang über gemeinsame Kanten. Verbunden sind zwei Nachbarn nur, wenn beide auf der gemeinsamen Kante Material haben; eine halbe Kachel hat das nur an ihren beiden Katheten:
 
-- Kacheln ohne Verbindung zu einem Lager fallen ab und zählen als entfernt.
+- Kacheln ohne Verbindung zu einem Lager fallen ab und zählen als entfernt. Das Symmetrie-Lager zählt dafür nicht: Was nur an der Symmetriekante hängt, hinge im ganzen Bauteil nur an seinem Spiegelbild und fällt dort ebenso ab.
 - Hat eine Lastkachel keine Verbindung mehr zu einem Lager, versagt der Entwurf sofort (Lastpfad unterbrochen).
 - Gerechnet werden nur Kacheln, die mit einer Lastkachel verbunden sind. Totes Material am Lager trägt nichts.
 - Berühren sich Kacheln nur an einer Ecke, bekommen sie dort getrennte Knoten. Real hat dieser Kontakt keinen Querschnitt, im FE-Modell wäre er ein Gelenk, das Kraft überträgt. Allgemein bekommt an jeder Kachelecke jede Gruppe von Kacheln, die dort über Kanten zusammenhängt, einen eigenen Knoten (mit halben Kacheln sind bis zu vier Gruppen an einer Ecke möglich).
@@ -127,6 +127,7 @@ Lineare Dreiecke können keine Biegung im Element abbilden und sind deshalb stei
 
 - Die Einspannung sperrt $`u = v = 0`$ an allen fünf Knoten einer Kachelkante.
 - Fest- und Loslager sind Gelenke wie in der Technischen Mechanik: Gesperrt wird nur der Mittelknoten der Kachelkante, beim Festlager $`u = v = 0`$, beim Loslager nur die Verschiebung senkrecht zur Kante. Damit übertragen sie kein Moment; ein Bauteil auf einem einzigen Festlager dreht sich um das Gelenk. Ihre Kachel ist die Lagerplatte: Ihre Elemente sind 1000-mal steifer als Stahl, damit die Lagerkraft nicht in einem Punkt ins Bauteil geht (die Spannung unter einer Punktlast wäre singulär). Die Platte dreht sich frei um das Gelenk und wird nicht nachgewiesen; zwischen Faktor 100 und 1000 ändern sich die Auslastungen um weniger als 0,1 Prozentpunkte.
+- Das Symmetrie-Lager (seit 0.15.0) sperrt an allen fünf Knoten jeder Kachelkante nur die Verschiebung senkrecht zur Kante, wie die Symmetrie-Randbedingung eines Halbmodells in ANSYS (Symmetry Region): an einer senkrechten Kante $`u = 0`$, an einer waagerechten $`v = 0`$. Entlang der Kante bleibt das Bauteil frei. Ein Halbmodell rechnet damit wie das ganze Bauteil mit dem gespiegelten Entwurf; der Test vergleicht den Balken 300 × 60 mm mit Fest- und Loslager und 25 kN auf der Oberseite mit seiner Hälfte (Loslager, Symmetrie, 12,5 kN): gleiche Auslastung des Vollteils und des gespiegelten ESO-Entwurfs auf 10⁻⁹.
 - Gesperrt wird an den Knoten der Lagerkachel selbst (an Kachelecken ihre Knotenkopie) und nur, wenn sie auf der gelagerten Seite Material hat. Was die Lagerkante nur mit einer Ecke oder einer Dreiecksspitze berührt, ist nicht gelagert.
 - Gesperrte Freiheitsgrade werden aus dem System gestrichen.
 - Die Last $`F`$ wirkt als gleichmäßige Linienlast auf der Kante der Lastkachel, nicht als Punktlast, damit am Lastangriff keine Singularität entsteht. Bei $`n`$ belasteten Elementkanten bekommt jede Kante $`F/n`$, je zur Hälfte an ihre beiden Endknoten (konsistente Knotenkräfte für lineare Ansätze), und zwar an die Knotenkopie der Lastkachel; zwei Lasten, die sich an einer Ecke treffen, bleiben so getrennt.
@@ -230,7 +231,7 @@ Noch nicht verglichen: ein Spielentwurf mit Kerben gegen ANSYS auf demselben Net
 ## Aufbau
 
 - `src/fem.js`: FE-Kern (Viereckelemente mit inkompatiblen Moden, Band-Cholesky, ESO), ohne DOM
-- `src/parts.js`: Zufallsbauteile aus einer Nummer, Baukasten-Prüfung, Bemessung der Lasten, Code für Links (Version 2 mit mehreren Lasten und Beträgen, Version 1 wird weiter gelesen), ohne DOM
+- `src/parts.js`: Zufallsbauteile aus einer Nummer, Baukasten-Prüfung, Bemessung der Lasten, Code für Links (Version 2 mit mehreren Lasten und Beträgen, Version 1 wird weiter gelesen; Lagerarten `w` Einspannung, `f` Festlager, `l` Loslager, `s` Symmetrie seit 0.15.0), ohne DOM
 - `src/game.js`: Spiel, Zeichnung, Baukasten, Wettkampf (Presence über claude.ai-Raum oder eigenen Server)
 - `src/shell.html`: Seite und Stil
 - `game.html`: gebaute Spieldatei (Seitenfragment), läuft als claude.ai-Artifact und über `server.mjs`
@@ -252,7 +253,7 @@ Der Server liest `game.html` beim Start ein: nach jedem Build neu starten.
 
 - **Fest:** Kragarm, Brücke, L-Winkel (Tabelle oben)
 - **Zufall:** Jede Nummer von 1 bis 99.999 ergibt auf jedem Gerät dasselbe Bauteil. Acht Bauformen (Kragarm, Träger, Konsole, Winkel, Rahmen, Mast, Galgen, Hänger) mit zufälligen Maßen, Aussparungen, manchmal einem vorgegebenen Loch, Lastangriff und Lastrichtung. Die Nummer steht im Link (`#nr-4711`), damit man ein Bauteil wiederholen oder weitergeben kann
-- **Bauen:** Im Baukasten Material aufziehen, Einspannung, Festlager, Loslager und Lasten an Außenkanten setzen, auch mehrere Lasten. Richtung (in 45°-Schritten) und Betrag lassen sich je Last einstellen, den Betrag auch durch Ziehen am Pfeil (die Pfeillänge zeigt den Betrag); mit „Beträge automatisch“ werden alle Lasten gleich groß und so bemessen, dass das Vollteil zu gut 50 % ausgelastet ist. Das Spiel prüft, ob das Bauteil gelagert ist und das Vollteil hält. Wahlweise zeigt „FE-Rechnung live zeigen“ beim Bauen nach jeder Änderung die Auslastung des Vollteils, auch während man einen Lastpfeil zieht. Zum Start wird das zuletzt gezeigte Bauteil übernommen, man kann es also auch abwandeln. Beim Spielen steht das Bauteil im Link (`#bau-…`)
+- **Bauen:** Im Baukasten Material aufziehen, Einspannung, Festlager, Loslager, Symmetrie und Lasten an Außenkanten setzen, auch mehrere Lasten. Richtung (in 45°-Schritten) und Betrag lassen sich je Last einstellen, den Betrag auch durch Ziehen am Pfeil (die Pfeillänge zeigt den Betrag); mit „Beträge automatisch“ werden alle Lasten gleich groß und so bemessen, dass das Vollteil zu gut 50 % ausgelastet ist. Das Spiel prüft, ob das Bauteil gelagert ist und das Vollteil hält. Wahlweise zeigt „FE-Rechnung live zeigen“ beim Bauen nach jeder Änderung die Auslastung des Vollteils, auch während man einen Lastpfeil zieht. Zum Start wird das zuletzt gezeigte Bauteil übernommen, man kann es also auch abwandeln. Beim Spielen steht das Bauteil im Link (`#bau-…`)
 
 ## Herausfordern
 

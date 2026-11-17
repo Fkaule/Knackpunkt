@@ -213,6 +213,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             Nichts kommt zurück, kreuzschraffierte Kacheln sind gesperrt. Versagt das Bauteil, ist der Versuch vorbei und zählt nichts: rechtzeitig aufhören und werten lassen.</p>
           <p class="howto" id="howto-edit" hidden><b>Baukasten:</b> Mit <b>Material</b> ein Rechteck aufziehen: Beginnt es auf einer leeren Kachel, kommt Material dazu, sonst wird es entfernt.
             <b>Einspannung</b>, <b>Festlager</b> und <b>Loslager</b> per Klick auf eine Außenkante setzen, die Einspannung über die ganze gerade Kante oder so weit, wie Sie ziehen.
+            <b>Symmetrie</b> setzt sich wie die Einspannung, hält die Kante aber nur senkrecht zu ihr: So spielt man ein Halbmodell, die Kante ist die Symmetrieebene.
             <b>Last</b>: Ein Klick auf eine freie Außenkante setzt eine weitere Last, Ziehen verteilt sie über mehrere Kacheln. Ein Klick auf eine Last wählt sie aus, ein zweiter dreht sie um 45°. Den Betrag ändern Sie auch, indem Sie einen Pfeil am freien Ende länger oder kürzer ziehen.
             Richtung und Betrag der gewählten Last stellen Sie rechts ein; mit „Beträge automatisch“ werden alle Lasten gleich groß und so bemessen, dass das Vollteil zu gut 50 % ausgelastet ist. „FE-Rechnung live zeigen“ färbt das Vollteil nach jeder Änderung nach seiner Auslastung. Beim Spielen steht das Bauteil im Link der Seite.</p>
           <div class="tools" id="tools" role="group" aria-label="Werkzeug">
@@ -234,6 +235,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <button type="button" data-t="wand" aria-pressed="false">Einspannung</button>
             <button type="button" data-t="fest" aria-pressed="false">Festlager</button>
             <button type="button" data-t="los" aria-pressed="false">Loslager</button>
+            <button type="button" data-t="sym" aria-pressed="false" title="Symmetrieebene: hält die ganze Kante nur senkrecht zu ihr">Symmetrie</button>
             <button type="button" data-t="last" aria-pressed="false">Last</button>
           </div>
         </div>
@@ -316,6 +318,7 @@ summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px 
             <li>Nachweis: mittlere Vergleichsspannung nach von Mises je Kachel höchstens 235 MPa. Örtliche Spitzen an Ecken dürfen fließen.</li>
             <li>Kacheln, die sich nur an einer Ecke berühren, gelten als getrennt. Was keine Verbindung zum Lager hat, fällt ab.</li>
             <li>Lager: Die Einspannung hält die ganze Kante. Fest- und Loslager sind Gelenke in der Mitte der Kante, wie in der Technischen Mechanik: Sie übertragen kein Moment, das Festlager hält in beide Richtungen, das Loslager nur senkrecht zur Kante. Ihre Kachel ist die Lagerplatte, steif und ohne eigenen Nachweis. Gelagert ist nur, was die Lagerkante mit einer ganzen Seite berührt, nicht nur mit einer Ecke.</li>
+            <li>Symmetrie: Die Kante ist die Schnittfläche eines Halbmodells. Sie wird auf ganzer Länge nur senkrecht zu sich gehalten und darf entlang der Kante gleiten, wie im ANSYS-Modell mit Symmetry Region. Was nur an dieser Kante hängt, fällt ab, denn im ganzen Bauteil hinge es nur an seinem Spiegelbild. Das Halbmodell rechnet so wie das ganze Bauteil mit dem gespiegelten Entwurf.</li>
             <li id="rule-eso">Gegner ist die Evolutionäre Strukturoptimierung (ESO): Sie entfernt immer die am geringsten ausgelastete Kachel, solange das Bauteil hält, und glättet danach, indem sie freie Ecken abschneidet.</li>
             <li>Nicht berechnet: Knicken und Eigengewicht.</li>
           </ul>
